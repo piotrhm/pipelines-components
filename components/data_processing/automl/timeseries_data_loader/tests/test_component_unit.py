@@ -512,8 +512,8 @@ class TestTimeseriesDataLoaderUnitTests:
         assert jan5[0]["target"] == "999"
 
     @mock.patch.dict(os.environ, mocked_env_variables, clear=True)
-    def test_invalid_timestamp_row_dropped(self, tmp_path):
-        """Unparseable timestamp coerced to NA and row dropped before split."""
+    def test_invalid_timestamp_raises_value_error(self, tmp_path):
+        """Unparseable timestamps fail fast (no silent row drops that break regular frequency)."""
         lines = ["item_id,timestamp,target,feature"]
         for i in range(10):
             lines.append(f"series-1,2024-01-{i + 1:02d},{i},{i * 10}")
@@ -522,23 +522,20 @@ class TestTimeseriesDataLoaderUnitTests:
         sampled_test = _make_test_artifact(tmp_path)
 
         with _mock_boto3_and_pandas(get_object_return={"Body": body_stream}):
-            result = timeseries_data_loader.python_func(
-                file_key="ts.csv",
-                bucket_name="b",
-                workspace_path=str(tmp_path),
-                target="target",
-                id_column="item_id",
-                timestamp_column="timestamp",
-                sampled_test_dataset=sampled_test,
-            )
-
-        assert result.sample_config["total_rows_loaded"] == 10
-        targets = {r["target"] for r in _read_csv_rows(sampled_test.path)}
-        assert "99" not in targets
+            with pytest.raises(ValueError, match="could not be parsed"):
+                timeseries_data_loader.python_func(
+                    file_key="ts.csv",
+                    bucket_name="b",
+                    workspace_path=str(tmp_path),
+                    target="target",
+                    id_column="item_id",
+                    timestamp_column="timestamp",
+                    sampled_test_dataset=sampled_test,
+                )
 
     @mock.patch.dict(os.environ, mocked_env_variables, clear=True)
-    def test_non_finite_target_row_dropped(self, tmp_path):
-        """inf target becomes NaN, row removed; remaining rows still split."""
+    def test_non_finite_target_inf_becomes_nan_row_retained(self, tmp_path):
+        """±inf in target is replaced with NaN; row is kept so AutoGluon can apply model-specific fill."""
         lines = ["item_id,timestamp,target,feature"]
         for i in range(10):
             lines.append(f"series-1,2024-01-{i + 1:02d},{i},{i * 10}")
@@ -557,7 +554,7 @@ class TestTimeseriesDataLoaderUnitTests:
                 sampled_test_dataset=sampled_test,
             )
 
-        assert result.sample_config["total_rows_loaded"] == 10
+        assert result.sample_config["total_rows_loaded"] == 11
         all_targets = []
         for path in (
             result.models_selection_train_data_path,
@@ -566,7 +563,7 @@ class TestTimeseriesDataLoaderUnitTests:
         ):
             all_targets.extend(r["target"] for r in _read_csv_rows(path))
         assert "inf" not in all_targets
-        assert "nan" not in "".join(all_targets).lower()
+        assert len(all_targets) == 11
 
 
 class TestTimeseriesDataLoaderScenarioMatrix:
@@ -688,11 +685,11 @@ class TestTimeseriesDataLoaderScenarioMatrix:
 
     @mock.patch.dict(os.environ, mocked_env_variables, clear=True)
     def test_all_rows_invalid_timestamp_raises_after_cleansing(self, tmp_path):
-        """If every row loses a valid timestamp, cleansing raises before split."""
+        """If every timestamp is unparseable, fail with a clear error (do not drop all rows)."""
         body = "item_id,timestamp,target,feature\na,not-a-date,0,x\nb,bad-ts,1,y\n"
         sampled_test = _make_test_artifact(tmp_path)
         with _mock_boto3_and_pandas(get_object_return={"Body": io.BytesIO(body.encode("utf-8"))}):
-            with pytest.raises(ValueError, match="After cleansing"):
+            with pytest.raises(ValueError, match="could not be parsed"):
                 timeseries_data_loader.python_func(
                     file_key="ts.csv",
                     bucket_name="b",

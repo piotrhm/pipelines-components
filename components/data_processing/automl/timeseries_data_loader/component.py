@@ -27,8 +27,9 @@ def timeseries_data_loader(
     """Load and split timeseries data from S3 for AutoGluon training.
 
     This component loads time series data from S3, samples it (up to 100 MB),
-    applies **cleansing** (non-finite values, invalid timestamps, missing keys/target,
-    duplicate ``(id_column, timestamp_column)`` rows), then performs a two-stage
+    applies light **cleansing** (replace ``±inf`` with NaN so AutoGluon can apply its
+    own missing-value logic; require parseable timestamps and non-null ids; drop
+    exact duplicate ``(id_column, timestamp_column)`` rows, keep last), then performs a two-stage
     **per-series temporal** split for efficient AutoGluon training:
     1. Primary split (default 80/20): for each distinct ``id_column`` value, the earliest
        (1 - test_size) fraction of rows by ``timestamp_column`` goes to the train portion and
@@ -55,7 +56,6 @@ def timeseries_data_loader(
     """
     import io
     import logging
-    import math
     import os
     from pathlib import Path
 
@@ -177,13 +177,17 @@ def timeseries_data_loader(
         )
         return pd.concat(chunk_list, ignore_index=True)
 
-    def _clean_timeseries_dataframe(data, id_col, ts_col, tgt, log):
-        """Normalize panel data for AutoGluon TimeSeriesDataFrame-style consumption.
+    def _clean_timeseries_dataframe(data, id_col, ts_col, log):
+        """Prepare panel data without dropping rows for missing targets (AutoGluon handles NaNs).
 
-        - Replaces ``±inf`` with NaN (then drops rows with missing target).
-        - Parses ``ts_col`` with ``errors='coerce'`` and drops NaT.
-        - Drops rows with missing ``id_col``, ``ts_col``, or ``tgt``.
-        - Drops duplicate ``(id_col, ts_col)`` rows keeping the **last** row in time order.
+        Per time-series practice, **do not** drop rows for null/NaN targets or non-finite values
+        after ``±inf``→NaN: removing observations creates irregular grids and breaks frequency
+        inference unless callers set ``freq`` explicitly. See AutoGluon TimeSeries missing-value
+        handling per model family.
+
+        This step: replace ``±inf`` with NaN; parse timestamps and **fail** if any are invalid;
+        **fail** if any ``id_col`` or timestamp is null; ``drop_duplicates`` on ``(id_col, ts_col)``
+        (keep last) only for true duplicate keys.
         """
         rows_in = len(data)
         if rows_in == 0:
@@ -194,16 +198,17 @@ def timeseries_data_loader(
         out = out.copy()
         out[ts_col] = pd.to_datetime(out[ts_col], errors="coerce", utc=False)
 
-        key_cols = [id_col, ts_col, tgt]
-        before_na = len(out)
-        out = out.dropna(subset=key_cols)
-        dropped_na = before_na - len(out)
-        if dropped_na:
-            log.info(
-                "Timeseries cleansing: dropped %s rows with missing id/timestamp/target or NaT timestamp "
-                "(had %s rows before this step).",
-                dropped_na,
-                before_na,
+        if out[id_col].isna().any():
+            raise ValueError(
+                f"Column {id_col!r} contains null values. Fix the input data; do not drop rows here, "
+                "as that can break regular frequency expected by AutoGluon TimeSeries."
+            )
+        bad_ts = int(out[ts_col].isna().sum())
+        if bad_ts:
+            raise ValueError(
+                f"Column {ts_col!r} has {bad_ts} value(s) that could not be parsed as datetimes. "
+                "Fix the input data. Dropping those rows would create irregular series and can break "
+                "AutoGluon frequency inference (set TimeSeriesPredictor(freq=...) or regularize upstream)."
             )
 
         out = out.sort_values(by=[id_col, ts_col])
@@ -219,30 +224,10 @@ def timeseries_data_loader(
             )
 
         rows_out = len(out)
-        log.info("Timeseries cleansing: rows in=%s out=%s.", rows_in, rows_out)
+        log.info("Timeseries cleansing: rows in=%s out=%s (target NaNs retained for AutoGluon).", rows_in, rows_out)
         if rows_out == 0:
             raise ValueError(
-                "After cleansing, the dataset has no rows left. Check for invalid timestamps, "
-                "missing targets, or empty input after removing duplicate (id, timestamp) pairs."
-            )
-
-        def _target_value_is_finite(val):
-            try:
-                return math.isfinite(float(val))
-            except (TypeError, ValueError):
-                return True
-
-        keep_tgt = out[tgt].map(_target_value_is_finite)
-        dropped_nonfinite = int((~keep_tgt).sum())
-        if dropped_nonfinite:
-            out = out[keep_tgt].copy()
-            log.info(
-                "Timeseries cleansing: dropped %s rows with non-finite numeric target (inf/NaN).",
-                dropped_nonfinite,
-            )
-        if len(out) == 0:
-            raise ValueError(
-                "After removing non-finite target values, the dataset has no rows left."
+                "After removing duplicate (id, timestamp) pairs, the dataset has no rows left."
             )
 
         return out.reset_index(drop=True)
@@ -262,7 +247,7 @@ def timeseries_data_loader(
             f"with columns {sorted(required_columns)}."
         )
 
-    df = _clean_timeseries_dataframe(df, id_column, timestamp_column, target, logger)
+    df = _clean_timeseries_dataframe(df, id_column, timestamp_column, logger)
 
     # Create workspace datasets directory
     datasets_dir = Path(workspace_path) / "datasets"

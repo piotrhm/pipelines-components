@@ -16,7 +16,7 @@ _DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}")
 
 
 class MockSeries:
-    """Column vector with ``map``, boolean ``~``, and ``sum`` (count of True)."""
+    """Column vector with ``map``, ``isna``, boolean ``~``, and ``sum`` (count of True)."""
 
     def __init__(self, values):
         self._values = list(values)
@@ -24,11 +24,17 @@ class MockSeries:
     def map(self, fn):
         return MockSeries([fn(v) for v in self._values])
 
+    def isna(self):
+        return MockSeries([_cell_is_na(v) for v in self._values])
+
     def __invert__(self):
         return MockSeries([not bool(x) for x in self._values])
 
     def sum(self):
         return sum(1 for x in self._values if x)
+
+    def any(self):
+        return any(self._values)
 
 
 def _parse_csv_cell(cell):

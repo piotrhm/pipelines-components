@@ -45,10 +45,21 @@ Multi-step RAG pipeline: parse PDFs, ingest into Milvus, deploy LLM.
 | `collection_name` | `str` | `rag_documents` | Milvus collection name. |
 | `embed_batch_size` | `int` | `64` | Batch size for embedding requests. |
 | `milvus_batch_size` | `int` | `256` | Batch size for Milvus inserts. |
+| `hf_secret_name` | `str` | `hf-token-secret` | Kubernetes Secret with HuggingFace token (key: `token`). Required for gated models. |
 | `llm_model_name` | `str` | `mistralai/Mistral-7B-Instruct-v0.3` | HuggingFace LLM model ID for inference. |
 | `model_cache_pvc` | `str` | `model-cache-pvc` | PVC for cached model weights. |
 | `max_model_len` | `int` | `4096` | Maximum context length for the LLM. |
 | `gpu_count` | `int` | `1` | GPUs for LLM serving. |
+
+## Prerequisites
+
+The default LLM (`mistralai/Mistral-7B-Instruct-v0.3`) is a gated model on HuggingFace. Before running the pipeline, create a Kubernetes Secret with your HuggingFace token:
+
+```bash
+oc create secret generic hf-token-secret --from-literal=token=hf_xxxxx
+```
+
+The secret name must match the `hf_secret_name` pipeline parameter (default: `hf-token-secret`), and the key must be `token`.
 
 ## Metadata 🗂️
 

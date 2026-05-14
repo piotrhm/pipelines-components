@@ -15,8 +15,8 @@ Read chunks from S3, embed, and insert into Milvus.
 | `milvus_host` | `str` | `None` | Milvus service hostname. |
 | `s3_prefix` | `str` | `chunks` | Key prefix for chunk files in S3. |
 | `embedding_endpoint` | `str` | `""` | Optional embedding service URL. If empty, uses a local sentence-transformers model. |
-| `embedding_model` | `str` | `sentence-transformers/all-MiniLM-L6-v2` | Embedding model name (for API or local). |
-| `embedding_dim` | `int` | `384` | Dimension of the embedding vectors. |
+| `embedding_model` | `str` | `ibm-granite/granite-embedding-125m-english` | Embedding model name (for API or local). |
+| `embedding_dim` | `int` | `768` | Dimension of the embedding vectors. |
 | `milvus_port` | `int` | `19530` | Milvus gRPC port. |
 | `milvus_db` | `str` | `default` | Milvus database name. |
 | `collection_name` | `str` | `rag_documents` | Milvus collection name. |

@@ -722,7 +722,9 @@ def parse_and_chunk(
         time.sleep(10)
 
     # Wait for job completion
-    print("Waiting for RayJob to complete...")
+    max_job_wait = 4 * 3600
+    job_start = time.time()
+    print(f"Waiting for RayJob to complete (timeout {max_job_wait}s)...")
     while True:
         rayjob_obj = custom_api.get_namespaced_custom_object(
             group=rayjob_group,
@@ -737,6 +739,12 @@ def parse_and_chunk(
             break
         elif job_status == "FAILED":
             raise RuntimeError(f"RayJob '{rayjob_name}' failed.")
+
+        job_elapsed = time.time() - job_start
+        if job_elapsed > max_job_wait:
+            raise TimeoutError(
+                f"RayJob '{rayjob_name}' did not complete within {max_job_wait}s. Last status: {job_status}"
+            )
         time.sleep(30)
 
     return f"s3://{s3_bucket}/{s3_prefix}"

@@ -77,6 +77,7 @@ def rag_multistep_pipeline(
     embed_batch_size: int = 64,
     milvus_batch_size: int = 256,
     # LLM deployment
+    hf_secret_name: str = "hf-token-secret",
     llm_model_name: str = "mistralai/Mistral-7B-Instruct-v0.3",
     model_cache_pvc: str = "model-cache-pvc",
     max_model_len: int = 4096,
@@ -121,6 +122,7 @@ def rag_multistep_pipeline(
         embed_batch_size: Batch size for embedding requests.
         milvus_batch_size: Batch size for Milvus inserts.
         llm_model_name: HuggingFace LLM model ID for inference.
+        hf_secret_name: Kubernetes Secret with HuggingFace token (key: 'token').
         model_cache_pvc: PVC for cached model weights.
         max_model_len: Maximum context length for the LLM.
         gpu_count: GPUs for LLM serving.
@@ -236,6 +238,11 @@ def rag_multistep_pipeline(
         download_task,
         pvc_name=model_cache_pvc,
         mount_path="/mnt/models",
+    )
+    kubernetes.use_secret_as_env(
+        download_task,
+        secret_name=hf_secret_name,
+        secret_key_to_env={"token": "HF_TOKEN"},
     )
 
     # Step 5: Deploy LLM for RAG inference (from PVC cache)

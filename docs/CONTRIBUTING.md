@@ -1097,12 +1097,14 @@ podman run --rm my-component:test python -c "import pandas; print(pandas.__versi
 Managed pipeline runtime images are different from custom base images used by individual components. While custom base images are for components you develop and maintain, managed pipeline runtime images are for pipelines that are deployed and managed by OpenDataHub operators in production environments.
 
 **When to use managed pipeline runtime images:**
+
 - Your pipeline is marked with `managed: true` in its metadata.yaml
 - Your pipeline requires specific runtime images (like specialized ML frameworks)
 - Your pipeline needs to work in OpenDataHub managed deployments
 - You need RELATED_IMAGE_* environment variables for image references
 
 **Current managed pipelines with runtime images:**
+
 - AutoML (`RELATED_IMAGE_ODH_AUTOML_IMAGE`)
 - AutoRAG (`RELATED_IMAGE_ODH_AUTORAG_IMAGE`)
 
@@ -1120,11 +1122,13 @@ This ensures managed pipelines use the exact images tested and approved for each
 ### Naming Convention
 
 All managed pipeline runtime images must follow the pattern:
-```
+
+```text
 RELATED_IMAGE_ODH_<IMAGE_NAME>_IMAGE
 ```
 
 For example:
+
 - Variable: `RELATED_IMAGE_ODH_AUTOML_IMAGE`
 - Constant: `AUTOML_IMAGE` (in `utils/consts.py`)
 
@@ -1137,6 +1141,7 @@ To add a new managed pipeline runtime image, submit pull requests to the three r
 Adding a new managed pipeline runtime image requires changes in **three repositories**:
 
 **A. pipelines-components (this repository):**
+
 ```python
 # In utils/consts.py
 DEFAULT_MYIMAGE_IMAGE = "quay.io/opendatahub/my-image:odh-stable"
@@ -1144,12 +1149,14 @@ MYIMAGE_IMAGE = os.getenv("RELATED_IMAGE_ODH_MYIMAGE_IMAGE", DEFAULT_MYIMAGE_IMA
 ```
 
 **B. ODH operator** ([opendatahub-operator](https://github.com/opendatahub-io/opendatahub-operator)):
+
 ```go
 // In internal/controller/components/datasciencepipelines/datasciencepipelines_support.go imageParamMap
 "RELATED_IMAGE_ODH_MYIMAGE_IMAGE": "RELATED_IMAGE_ODH_MYIMAGE_IMAGE",
 ```
 
 **C. DSPO** ([data-science-pipelines-operator](https://github.com/opendatahub-io/data-science-pipelines-operator)):
+
 ```yaml
 # In config/manager/manager.yaml
 - name: RELATED_IMAGE_ODH_MYIMAGE_IMAGE
@@ -1183,13 +1190,15 @@ def my_automl_component():
 ```
 
 This pattern ensures:
+
 - Production deployments use the approved managed image
 - Development environments fall back to default images
 - Image references are centralized and maintainable
 
-### Getting Help
+### Getting Help with Managed Pipeline Images
 
 If you have questions about managed pipeline runtime images:
+
 - Review existing implementations in `utils/consts.py`
 - Check the managed pipeline examples in `pipelines/` directories
 - Ask questions in your pull request

@@ -75,9 +75,9 @@ class MockSeries:
 
     def astype(self, dtype):
         """Type conversion."""
-        if dtype == int:
+        if dtype is int:
             return MockSeries([int(v) if not _cell_is_na(v) else v for v in self._values])
-        elif dtype == str:
+        elif dtype is str:
             return MockSeries([str(v) if not _cell_is_na(v) else v for v in self._values])
         return self
 

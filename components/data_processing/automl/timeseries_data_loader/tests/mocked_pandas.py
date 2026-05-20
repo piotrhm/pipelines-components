@@ -30,6 +30,10 @@ class MockSeries:
         """Return boolean ``MockSeries`` aligned with ``pandas.Series.isna()``."""
         return MockSeries([_cell_is_na(v) for v in self._values])
 
+    def notna(self):
+        """Return boolean ``MockSeries`` aligned with ``pandas.Series.notna()``."""
+        return ~self.isna()
+
     def __invert__(self):
         """Boolean negation element-wise (for ``~mask``)."""
         return MockSeries([not bool(x) for x in self._values])
@@ -42,13 +46,52 @@ class MockSeries:
         """Return whether any value is truthy."""
         return any(self._values)
 
+    def all(self):
+        """Return whether all values are truthy."""
+        return all(self._values)
+
+    def __getitem__(self, key):
+        """Boolean masking or positional indexing."""
+        if isinstance(key, MockSeries):
+            # Boolean mask
+            return MockSeries([v for v, include in zip(self._values, key._values) if include])
+        else:
+            # Positional indexing
+            return self._values[key]
+
+    def __len__(self):
+        """Return the number of values."""
+        return len(self._values)
+
+    def min(self):
+        """Return minimum value."""
+        non_null = [v for v in self._values if not _cell_is_na(v)]
+        return min(non_null) if non_null else None
+
+    def max(self):
+        """Return maximum value."""
+        non_null = [v for v in self._values if not _cell_is_na(v)]
+        return max(non_null) if non_null else None
+
+    def astype(self, dtype):
+        """Type conversion."""
+        if dtype == int:
+            return MockSeries([int(v) if not _cell_is_na(v) else v for v in self._values])
+        elif dtype == str:
+            return MockSeries([str(v) if not _cell_is_na(v) else v for v in self._values])
+        return self
+
+    def round(self):
+        """Round numeric values."""
+        return MockSeries([round(v) if isinstance(v, (int, float)) and not _cell_is_na(v) else v for v in self._values])
+
 
 def _parse_csv_cell(cell):
     """Parse special float tokens from CSV text (real pandas infers these)."""
     if not isinstance(cell, str):
         return cell
     sl = cell.strip().lower()
-    if sl in ("inf", "+inf", "infinity"):
+    if sl in ("inf", "+inf", "infinity", "+infinity"):
         return float("inf")
     if sl in ("-inf", "-infinity"):
         return float("-inf")
@@ -319,7 +362,39 @@ def make_mocked_pandas_module():
         _ = utc
         if isinstance(arg, MockSeries):
             return MockSeries([_to_datetime_scalar(v, errors) for v in arg._values])
+        # Handle string datetime (used in fractional year conversion)
+        if isinstance(arg, str):
+            return _to_datetime_scalar(arg, errors)
         raise TypeError(f"mock to_datetime not implemented for {type(arg)!r}")
+
+    def to_numeric(arg, errors="coerce"):
+        """Convert to numeric like ``pandas.to_numeric``."""
+        if isinstance(arg, MockSeries):
+            result = []
+            for v in arg._values:
+                if _cell_is_na(v):
+                    result.append(None if errors == "coerce" else v)
+                elif isinstance(v, (int, float)):
+                    result.append(float(v))
+                else:
+                    try:
+                        result.append(float(v))
+                    except (ValueError, TypeError):
+                        if errors == "coerce":
+                            result.append(None)
+                        else:
+                            raise
+            return MockSeries(result)
+        raise TypeError(f"mock to_numeric not implemented for {type(arg)!r}")
+
+    def to_timedelta(arg, unit="D"):
+        """Convert to timedelta - simplified for day offsets."""
+        if isinstance(arg, (int, float)):
+            # Just return the numeric value - we'll add it to dates
+            return arg
+        if isinstance(arg, MockSeries):
+            return MockSeries([v if not _cell_is_na(v) else None for v in arg._values])
+        raise TypeError(f"mock to_timedelta not implemented for {type(arg)!r}")
 
     def _read_csv(stream, chunksize=None):
         if chunksize is not None:
@@ -338,4 +413,6 @@ def make_mocked_pandas_module():
     mod.concat = _concat
     mod.DataFrame = _dataframe
     mod.to_datetime = to_datetime
+    mod.to_numeric = to_numeric
+    mod.to_timedelta = to_timedelta
     return mod

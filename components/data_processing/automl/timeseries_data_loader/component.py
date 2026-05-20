@@ -196,7 +196,49 @@ def timeseries_data_loader(
         out = data.replace([float("inf"), float("-inf")], float("nan"))
 
         out = out.copy()
-        out[ts_col] = pd.to_datetime(out[ts_col], errors="coerce", utc=False)
+
+        # Detect and handle numeric fractional year timestamps
+        ts_series = out[ts_col]
+        non_null_ts = ts_series[ts_series.notna()]
+
+        # Check if all non-null timestamps are numeric
+        is_numeric = pd.to_numeric(non_null_ts, errors="coerce").notna().all() if len(non_null_ts) > 0 else False
+
+        if is_numeric:
+            # Convert to numeric
+            numeric_ts = pd.to_numeric(ts_series, errors="coerce")
+            non_null_numeric = numeric_ts[numeric_ts.notna()]
+
+            # Check if values look like fractional years (reasonable year range: 1800-2200)
+            if len(non_null_numeric) > 0:
+                min_val = non_null_numeric.min()
+                max_val = non_null_numeric.max()
+
+                if 1800 <= min_val <= 2200 and 1800 <= max_val <= 2200:
+                    # Treat as fractional years - keep as numeric for sorting
+                    # AutoGluon will handle conversion when loading the data
+                    log.info(
+                        "Timestamp column %r contains numeric values in year range [%.2f, %.2f]; "
+                        "treating as fractional years (kept as numeric for sorting).",
+                        ts_col,
+                        min_val,
+                        max_val,
+                    )
+                    out[ts_col] = numeric_ts
+                else:
+                    # Numeric but not in year range - likely Unix timestamps or invalid
+                    raise ValueError(
+                        f"Column {ts_col!r} contains numeric values outside the fractional year range "
+                        f"(1800-2200): min={min_val:.2f}, max={max_val:.2f}. "
+                        "If these are Unix timestamps, convert them to ISO date strings upstream. "
+                        "If these are fractional years, ensure values are in a reasonable range."
+                    )
+            else:
+                # All nulls, let pd.to_datetime handle it
+                out[ts_col] = pd.to_datetime(out[ts_col], errors="coerce", utc=False)
+        else:
+            # Not all numeric - use standard datetime parsing
+            out[ts_col] = pd.to_datetime(out[ts_col], errors="coerce", utc=False)
 
         if out[id_col].isna().any():
             raise ValueError(
@@ -211,6 +253,9 @@ def timeseries_data_loader(
                 "AutoGluon frequency inference (set TimeSeriesPredictor(freq=...) or regularize upstream)."
             )
 
+        # Sort by (id, timestamp) BEFORE deduplication so that keep="last" means
+        # "keep the last row in chronological order" (after sorting), not "keep the last row in file order".
+        # This ensures we retain the chronologically latest observation for each (id, timestamp) pair.
         out = out.sort_values(by=[id_col, ts_col])
         before_dedupe = len(out)
         out = out.drop_duplicates(subset=[id_col, ts_col], keep="last")

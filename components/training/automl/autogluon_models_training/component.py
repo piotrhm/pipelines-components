@@ -448,45 +448,63 @@ def autogluon_models_training(
         per_class_pr: dict[str, dict[str, Any]] = {}
         roc_aucs: list[float] = []
         ap_scores: list[float] = []
-        supports: list[int] = []
+        weights: list[int] = []
+        skipped_classes: list[str] = []
 
         for label in classes:
             key = str(label.item() if hasattr(label, "item") else label)
             y_true_binary = _binarize_labels(y_true, label)
             support = int(y_true_binary.sum())
-            supports.append(support)
             y_score = proba_df[label].to_numpy()
-            roc = _roc_curve_block(y_true_binary, y_score)
-            roc["support"] = support
-            per_class_roc[key] = roc
-            roc_aucs.append(roc["auc"])
-            pr = _pr_curve_block(
-                y_true_binary,
-                y_score,
-                baseline_precision=support / num_samples if num_samples else 0.0,
+            try:
+                roc = _roc_curve_block(y_true_binary, y_score)
+                roc["support"] = support
+                per_class_roc[key] = roc
+                roc_aucs.append(roc["auc"])
+                pr = _pr_curve_block(
+                    y_true_binary,
+                    y_score,
+                    baseline_precision=support / num_samples if num_samples else 0.0,
+                )
+                per_class_pr[key] = pr
+                ap_scores.append(pr["average_precision"])
+                weights.append(support)
+            except ValueError as e:
+                logger.warning(
+                    "Skipping ROC/PR curves for class %r: %s",
+                    key,
+                    e,
+                )
+                skipped_classes.append(key)
+
+        if not per_class_roc:
+            raise ValueError(
+                "Cannot compute multiclass curves: no class had both positive and negative "
+                f"examples in test data (skipped: {skipped_classes})."
             )
-            per_class_pr[key] = pr
-            ap_scores.append(pr["average_precision"])
 
         serializable_classes = [c.item() if hasattr(c, "item") else c for c in classes]
 
-        return {
+        payload: dict[str, Any] = {
             "task_type": "multiclass",
             "strategy": "ovr",
             "num_classes": len(classes),
             "classes": serializable_classes,
             "num_samples": num_samples,
             "roc_curve": {
-                "auc_macro": float(np.mean(roc_aucs)) if roc_aucs else 0.0,
-                "auc_weighted": _macro_weighted_curve_metric(roc_aucs, supports),
+                "auc_macro": float(np.mean(roc_aucs)),
+                "auc_weighted": _macro_weighted_curve_metric(roc_aucs, weights),
                 "per_class": per_class_roc,
             },
             "precision_recall_curve": {
-                "average_precision_macro": float(np.mean(ap_scores)) if ap_scores else 0.0,
-                "average_precision_weighted": _macro_weighted_curve_metric(ap_scores, supports),
+                "average_precision_macro": float(np.mean(ap_scores)),
+                "average_precision_weighted": _macro_weighted_curve_metric(ap_scores, weights),
                 "per_class": per_class_pr,
             },
         }
+        if skipped_classes:
+            payload["skipped_classes"] = skipped_classes
+        return payload
 
     def build_curves_json(
         y_true,
@@ -564,13 +582,6 @@ def autogluon_models_training(
                     "Could not generate curves.json for model %r: %s. Skipping curve generation.",
                     model_name_full,
                     str(e),
-                )
-            except Exception as e:
-                logger.warning(
-                    "Unexpected error generating curves.json for model %r: %s. Skipping curve generation.",
-                    model_name_full,
-                    str(e),
-                    exc_info=True,
                 )
 
         with (Path(notebooks.path) / notebook_file).open("r", encoding="utf-8") as f:

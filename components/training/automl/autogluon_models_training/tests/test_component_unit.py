@@ -654,6 +654,77 @@ class TestAutogluonModelsTrainingUnitTests:
         cm_path = Path(models_output_dir) / "LightGBM_BAG_L1_FULL" / "metrics" / "confusion_matrix.json"
         assert cm_path.exists()
 
+    @mock.patch("pandas.read_csv")
+    @mock.patch("autogluon.tabular.TabularPredictor")
+    def test_multiclass_curves_skips_class_with_no_test_examples(
+        self,
+        mock_predictor_class,
+        mock_read_csv,
+        mock_notebooks,
+        tmp_path,
+    ):
+        """OvR curves skip classes absent from test labels but still write curves for others."""
+        mock_predictor = mock.MagicMock()
+        mock_predictor_clone = mock.MagicMock()
+        mock_predictor_class.return_value.fit.return_value = mock_predictor
+        mock_predictor.clone.return_value = mock_predictor_clone
+        mock_predictor.problem_type = "multiclass"
+        mock_predictor.label = "target"
+        mock_predictor.eval_metric = "accuracy"
+        _mock_leaderboard_top_models(mock_predictor, ["LightGBM_BAG_L1"])
+        mock_predictor_clone.feature_importance.return_value = mock.MagicMock(to_dict=lambda: {"f": 0.1})
+
+        y_true, y_proba = _dataframes_with_real_pandas(
+            lambda pd: (
+                pd.Series([1, 1, 2, 2]),
+                pd.DataFrame(
+                    {
+                        0: [0.1, 0.1, 0.1, 0.1],
+                        1: [0.7, 0.8, 0.1, 0.2],
+                        2: [0.2, 0.1, 0.8, 0.7],
+                    }
+                ),
+            )
+        )
+        mock_test_df = _mock_csv_frame()
+        mock_test_df.__getitem__ = lambda self, key: y_true if key == "target" else mock.MagicMock()
+        mock_predictor_clone.predict_proba.return_value = y_proba
+        mock_predictor_clone.evaluate_predictions.return_value = {
+            "accuracy": 0.75,
+            "confusion_matrix": mock.MagicMock(to_dict=lambda: {"1": {"1": 2}}),
+        }
+        mock_read_csv.side_effect = [_mock_csv_frame(), mock_test_df]
+
+        workspace_path = str(tmp_path / "ws")
+        Path(workspace_path).mkdir()
+        models_output_dir = str(tmp_path / "out")
+        Path(models_output_dir).mkdir()
+        mock_models_artifact = mock.MagicMock()
+        mock_models_artifact.path = models_output_dir
+        mock_models_artifact.metadata = {}
+
+        pytest.importorskip("sklearn")
+        autogluon_models_training.python_func(
+            label_column="target",
+            task_type="multiclass",
+            top_n=1,
+            train_data_path="/tmp/train.csv",
+            test_data=mock.MagicMock(path="/tmp/test.csv"),
+            workspace_path=workspace_path,
+            pipeline_name=PIPELINE_NAME,
+            run_id=RUN_ID,
+            sample_row=SAMPLE_ROW,
+            models_artifact=mock_models_artifact,
+            notebooks=mock_notebooks,
+        )
+
+        curves_path = Path(models_output_dir) / "LightGBM_BAG_L1_FULL" / "metrics" / "curves.json"
+        assert curves_path.exists()
+        curves_payload = json.loads(curves_path.read_text())
+        assert curves_payload["skipped_classes"] == ["0"]
+        assert set(curves_payload["roc_curve"]["per_class"]) == {"1", "2"}
+        assert set(curves_payload["precision_recall_curve"]["per_class"]) == {"1", "2"}
+
     # ── Call order and structural invariants ───────────────────────────────────
 
     @mock.patch("shutil.rmtree")

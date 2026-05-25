@@ -20,6 +20,7 @@ from ..generate_managed_pipelines import (
     managed_pipeline_entry_from_dir,
     should_recompile_managed_pipelines,
     stage_managed_pipelines,
+    staged_pipeline_yaml_path,
 )
 
 
@@ -277,6 +278,15 @@ def test_should_recompile_managed_pipelines(
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     assert should_recompile_managed_pipelines() is expected
+
+
+@pytest.mark.parametrize("bad_name", ["../x", "a/b", "..", "."])
+def test_staged_pipeline_yaml_path_rejects_unsafe_names(tmp_path: Path, bad_name: str) -> None:
+    """Pipeline names must be plain basenames under the staging directory."""
+    output_dir = tmp_path / "staging"
+    output_dir.mkdir()
+    with pytest.raises(ValueError, match="Invalid pipeline name|escapes output dir"):
+        staged_pipeline_yaml_path(output_dir, bad_name)
 
 
 def _write_managed_pipeline_fixture(repo: Path, *, name: str = "my_pipeline") -> Path:

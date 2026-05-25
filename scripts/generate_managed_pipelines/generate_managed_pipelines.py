@@ -221,6 +221,16 @@ def _module_name_for_compilation(pipeline_py: Path, repo_root: Path) -> str:
         return "managed_compile_" + pipeline_py.stem
 
 
+def staged_pipeline_yaml_path(output_dir: Path, name: str) -> Path:
+    """Return a resolved ``{name}.yaml`` path confined to ``output_dir``."""
+    if not name or name != Path(name).name or name in (".", ".."):
+        raise ValueError(f"Invalid pipeline name for staging: {name!r}")
+    dest = (output_dir / f"{name}.yaml").resolve()
+    if not dest.is_relative_to(output_dir.resolve()):
+        raise ValueError(f"Staged path escapes output dir: {name!r}")
+    return dest
+
+
 def should_recompile_managed_pipelines() -> bool:
     """Return True when DSPO/runtime env provides RELATED_IMAGE overrides for managed runtimes."""
     return bool(os.getenv(RELATED_IMAGE_AUTOML_ENV, "").strip() or os.getenv(RELATED_IMAGE_AUTORAG_ENV, "").strip())
@@ -260,7 +270,7 @@ def stage_managed_pipelines(repo_root: Path, output_dir: Path) -> int:
 
     for entry in pipelines:
         pipeline_py = repo_root / entry.path
-        output_yaml = output_dir / f"{entry.name}.yaml"
+        output_yaml = staged_pipeline_yaml_path(output_dir, entry.name)
         try:
             compile_managed_pipeline(
                 pipeline_py=pipeline_py,

@@ -9,6 +9,7 @@ from scripts.generate_managed_pipelines.generate_managed_pipelines import (
     OUTPUT_FILENAME,
     should_recompile_managed_pipelines,
     stage_managed_pipelines,
+    staged_pipeline_yaml_path,
 )
 
 APP_ROOT = Path("/app")
@@ -26,7 +27,7 @@ def _copy_prebuilt_from_image() -> None:
             raise ValueError(f"Manifest path escapes app root: {entry['path']}")
         if not src.is_file():
             raise FileNotFoundError(f"Pipeline YAML missing for {entry['name']!r}: {src}")
-        shutil.copy2(src, OUTPUT_DIR / f"{entry['name']}.yaml")
+        shutil.copy2(src, staged_pipeline_yaml_path(OUTPUT_DIR, entry["name"]))
 
     shutil.copy2(APP_ROOT / MANIFEST, OUTPUT_DIR / MANIFEST)
     print(f"Staged {len(entries)} pipeline(s) in {OUTPUT_DIR}")

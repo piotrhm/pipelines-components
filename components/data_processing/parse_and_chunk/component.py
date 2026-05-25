@@ -652,13 +652,39 @@ def parse_and_chunk(
         ttl_seconds_after_finished=300,
     )
 
-    custom_api = k8s_client.CustomObjectsApi()
+    import os
 
-    # The codeflare SDK's vendored kuberay_job_api creates its own
-    # CustomObjectsApi in __init__, which may pick up a stale kubeconfig
-    # instead of the in-cluster SA token. Replace it with one that uses
-    # the in-cluster config we loaded above.
+    # Debug: verify SA token is mounted and K8s auth state
+    token_path = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    print(f"DEBUG: Token file exists: {os.path.exists(token_path)}")
+    if os.path.exists(token_path):
+        with open(token_path) as f:
+            token = f.read()
+        print(f"DEBUG: Token length: {len(token)}")
+        print(f"DEBUG: Token starts with: {token[:20]}...")
+    else:
+        print("DEBUG: NO SA TOKEN MOUNTED")
+
+    # Check what the SDK's internal client looks like
+    sdk_config = job._api.api.api_client.configuration
+    print(f"DEBUG: SDK api_client host: {sdk_config.host}")
+    print(f"DEBUG: SDK api_client has api_key: {bool(sdk_config.api_key)}")
+    print(f"DEBUG: SDK api_client api_key_prefix: {sdk_config.api_key_prefix}")
+
+    # Re-load in-cluster config after SDK constructor may have overridden it
+    try:
+        k8s_config.load_incluster_config()
+    except k8s_config.ConfigException:
+        k8s_config.load_kube_config()
+
+    custom_api = k8s_client.CustomObjectsApi()
     job._api.api = custom_api
+
+    # Verify the replacement client
+    new_config = custom_api.api_client.configuration
+    print(f"DEBUG: New api_client host: {new_config.host}")
+    print(f"DEBUG: New api_client has api_key: {bool(new_config.api_key)}")
+    print(f"DEBUG: New api_client api_key_prefix: {new_config.api_key_prefix}")
 
     rayjob_group = "ray.io"
     rayjob_version = "v1"

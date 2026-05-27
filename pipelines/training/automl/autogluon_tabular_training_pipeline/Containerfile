@@ -7,9 +7,12 @@ COPY pyproject.toml __init__.py /tmp/kfp-src/
 COPY components/ /tmp/kfp-src/components/
 COPY pipelines/ /tmp/kfp-src/pipelines/
 COPY utils/ /tmp/kfp-src/utils/
-RUN pip wheel --index-url https://console.redhat.com/api/pypi/public-rhai/rhoai/3.4/cpu-ubi9/simple -w /tmp/dist /tmp/kfp-src/
+RUN pip wheel --no-deps --index-url https://console.redhat.com/api/pypi/public-rhai/rhoai/3.4/cpu-ubi9/simple -w /tmp/dist /tmp/kfp-src/
 
 FROM ${BASE_IMAGE}
+
+COPY --from=builder /tmp/dist/*.whl /tmp/
+RUN pip install --no-cache-dir --no-deps /tmp/*.whl
 
 COPY pipelines/training/automl/autogluon_tabular_training_pipeline/requirements.txt \
      pipelines/training/automl/autogluon_tabular_training_pipeline/requirements-pypi.txt \
@@ -18,5 +21,3 @@ COPY pipelines/training/automl/autogluon_tabular_training_pipeline/requirements.
 ## Ensure build isolation
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 RUN pip install --index-url https://pypi.org/simple --no-cache-dir -r /tmp/requirements-pypi.txt
-COPY --from=builder /tmp/dist/*.whl /tmp/
-RUN pip install --no-cache-dir --no-deps /tmp/*.whl

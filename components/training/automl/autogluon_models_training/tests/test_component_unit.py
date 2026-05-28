@@ -140,7 +140,11 @@ def _make_component_status_artifact(tmp_path):
 
 def _base_call_kwargs(workspace_path, models_artifact, test_data, tmp_path=None):
     """Return minimal valid kwargs for autogluon_models_training.python_func."""
-    rs = _make_component_status_artifact(tmp_path) if tmp_path is not None else mock.MagicMock(path="/tmp/rs", metadata={})
+    rs = (
+        _make_component_status_artifact(tmp_path)
+        if tmp_path is not None
+        else mock.MagicMock(path="/tmp/rs", metadata={})
+    )
     return dict(
         label_column="target",
         task_type="regression",

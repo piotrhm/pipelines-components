@@ -63,12 +63,12 @@ def leaderboard_evaluation(
     from pathlib import Path
 
     import pandas as pd
+    from kfp_components.components.training.automl.shared.component_status import ComponentStatusTracker
     from kfp_components.components.training.automl.shared.leaderboard_utils import (
         _build_leaderboard_html,
         _build_leaderboard_table,
         _round_metrics,
     )
-    from kfp_components.components.training.automl.shared.component_status import ComponentStatusTracker
 
     # Initialize status tracker
     status = ComponentStatusTracker(component_status.path, "leaderboard_evaluation")

@@ -80,7 +80,6 @@ def autogluon_timeseries_models_training(
         COMPONENT_TIMESERIES_MODELS_TRAINING,
         RUN_STATUS_ARTIFACT_DISPLAY_NAME,
         RunStatusRecorder,
-        shared_automl_dir,
     )
 
     run_status = RunStatusRecorder(workspace_path, COMPONENT_TIMESERIES_MODELS_TRAINING)

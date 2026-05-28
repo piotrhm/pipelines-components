@@ -98,6 +98,35 @@ def test_init_seeds_full_pipeline_as_pending(tmp_path):
     }
 
 
+def test_init_copies_catalog_metadata_from_manifest(tmp_path):
+    """Init should expose manifest order, descriptions, and stage steps for dashboards."""
+    ws = str(tmp_path)
+    init_run_status(
+        ws,
+        kfp_run_id="run-1",
+        pipeline_name="p1",
+        run_status_pipeline_id=PIPELINE_TABULAR_TRAINING,
+    )
+    doc = load_run_status(ws)
+    loader = doc["components"][COMPONENT_DATA_LOADER]
+    assert loader["order"] == 1
+    assert "description" in loader
+    validate_inputs = next(s for s in loader["stages"] if s["id"] == "validate_inputs")
+    assert validate_inputs["status"] == STATUS_PENDING
+    assert "description" in validate_inputs
+    assert "steps" not in validate_inputs
+
+    training = doc["components"][COMPONENT_MODELS_TRAINING]
+    assert training["order"] == 2
+    model_selection = next(s for s in training["stages"] if s["id"] == "model_selection")
+    assert model_selection["steps"] == [
+        "feature_engineering",
+        "model_training",
+        "stacking",
+        "model_evaluation",
+    ]
+
+
 def test_ensure_pipeline_plan_preserves_progress(tmp_path):
     """Test that ensure_pipeline_plan preserves progress."""
     ws = str(tmp_path)
@@ -140,6 +169,7 @@ def test_record_stage_autofills_steps_from_manifest_on_completed(tmp_path):
         "model_evaluation",
     ]
     assert model_selection["top_n"] == 2
+    assert "description" in model_selection
     record_stage(ws, COMPONENT_DATA_LOADER, "validate_inputs", STATUS_COMPLETED)
     loader_stage = next(
         s for s in load_run_status(ws)["components"][COMPONENT_DATA_LOADER]["stages"] if s["id"] == "validate_inputs"

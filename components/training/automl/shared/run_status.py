@@ -41,7 +41,6 @@ STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
 
 _DEFAULT_INITIAL_DOCUMENT: dict[str, Any] = {
-    "run_status_rel_path": RUN_STATUS_REL_PATH,
     "components": {},
 }
 
@@ -186,16 +185,35 @@ def _initial_document_from_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     return copy.deepcopy(_DEFAULT_INITIAL_DOCUMENT)
 
 
+def _catalog_fields_from_definition(defn: dict[str, Any], *, include_steps: bool = False) -> dict[str, Any]:
+    """Copy static catalog fields from a manifest component or stage definition."""
+    fields: dict[str, Any] = {}
+    if "order" in defn:
+        fields["order"] = defn["order"]
+    description = defn.get("description")
+    if isinstance(description, str) and description:
+        fields["description"] = description
+    if include_steps:
+        raw_steps = defn.get("steps")
+        if isinstance(raw_steps, list) and raw_steps:
+            fields["steps"] = [str(step) for step in raw_steps]
+    return fields
+
+
 def _pending_stage_entry(stage_def: dict[str, Any]) -> dict[str, Any]:
     stage_id = stage_def.get("id")
     if not stage_id:
         raise ValueError("manifest stage entry requires an id")
-    return {"id": stage_id, "status": STATUS_PENDING}
+    entry: dict[str, Any] = {"id": stage_id, "status": STATUS_PENDING}
+    entry.update(_catalog_fields_from_definition(stage_def, include_steps=True))
+    return entry
 
 
 def _pending_component_entry(comp_def: dict[str, Any]) -> dict[str, Any]:
     stages = [_pending_stage_entry(stage_def) for stage_def in comp_def.get("stages", []) if stage_def.get("id")]
-    return {"state": STATUS_PENDING, "stages": stages}
+    entry: dict[str, Any] = {"state": STATUS_PENDING, "stages": stages}
+    entry.update(_catalog_fields_from_definition(comp_def))
+    return entry
 
 
 def _build_pipeline_plan_from_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
@@ -281,7 +299,6 @@ def init_run_status(
     document["kfp_run_id"] = kfp_run_id
     document["pipeline_name"] = pipeline_name
     document[DOCUMENT_PIPELINE_ID_FIELD] = run_status_pipeline_id
-    document["run_status_rel_path"] = RUN_STATUS_REL_PATH
     document["components"] = _build_pipeline_plan_from_manifest(manifest)
     save_run_status(workspace_path, document)
     _log_pipeline_flow(run_status_pipeline_id, templates_root=templates_root)
@@ -385,7 +402,11 @@ def record_stage(
     pipeline_id = document.get(DOCUMENT_PIPELINE_ID_FIELD)
     components = document.setdefault("components", {})
     entry = components.setdefault(component_name, {"state": STATUS_RUNNING, "stages": []})
+    stages = entry.setdefault("stages", [])
+    index = _stage_index(stages, stage_id)
+    prior_stage = stages[index] if index is not None else {}
     stage: dict[str, Any] = {
+        **prior_stage,
         "id": stage_id,
         "status": status,
         "timestamp": _utc_now_iso(),
@@ -400,8 +421,6 @@ def record_stage(
         )
         if manifest_steps:
             stage["steps"] = manifest_steps
-    stages = entry.setdefault("stages", [])
-    index = _stage_index(stages, stage_id)
     if index is None:
         stages.append(stage)
     else:

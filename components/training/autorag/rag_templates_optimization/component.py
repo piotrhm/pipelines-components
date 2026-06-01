@@ -709,13 +709,11 @@ def rag_templates_optimization(
             generation_model_id = rp.get("foundation_model")
         if not generation_model_id and hasattr(rp.get("foundation_model"), "model_id"):
             generation_model_id = getattr(rp.get("foundation_model"), "model_id", None)
-        generation_system_message_text = (
-            generation.get(
-                "system_message_text",
-                (
-                    "Please answer the question I provide in the Question section below, based solely "
-                    "on the information I provide in the Context section. If unanswerable, say so."
-                ),
+        generation_system_message_text = generation.get(
+            "system_message_text",
+            (
+                "Please answer the question I provide in the Question section below, based solely "
+                "on the information I provide in the Context section. If unanswerable, say so."
             ),
         )
 
@@ -737,7 +735,7 @@ def rag_templates_optimization(
                 "vector_store_binding": {
                     "provider_id": vector_io_provider_id,
                     "provider_type": getattr(provider, "provider_type", "Unknown"),
-                    "vector_store_id": eval.collection,
+                    "vector_store_id": evaluation_result.collection,
                 },
                 "chunking": {
                     "method": chunking.get("method", "recursive"),

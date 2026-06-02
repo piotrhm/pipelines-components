@@ -136,11 +136,16 @@ def search_space_preparation(
         "tr": "Turkish",
     }
 
-    def _detect_language_via_llm(questions: list[str], llm_client: OgxClient) -> dict[str, str] | None:
+    def _detect_language_via_llm(
+        questions: list[str],
+        llm_client: OgxClient,
+        allowed_generation_models: list[str] | None = None,
+    ) -> dict[str, str] | None:
         """Detect the dominant language by asking an LLM.
 
-        Sends a few sample questions to the first available generation model and asks
-        it to identify the language. Returns a dict with code/name, or None for English.
+        Sends a few sample questions to a generation model and asks for the ISO 639-1 code.
+        Prefers models from allowed_generation_models when provided.
+        Returns a dict with code/name, or None for English.
         """
         sample_text = "\n".join(f"- {q}" for q in questions[:5])
         valid_codes = ", ".join(sorted(LANGUAGE_MAP.keys()))
@@ -148,15 +153,19 @@ def search_space_preparation(
         try:
             models_response = llm_client.models.list()
             models_list = models_response.data if hasattr(models_response, "data") else list(models_response)
+            registered_ids = {(m.identifier if hasattr(m, "identifier") else str(m.id)) for m in models_list}
+
             model_id = None
-            for m in models_list:
-                if hasattr(m, "model_type") and getattr(m, "model_type", "") == "llm":
-                    model_id = m.identifier if hasattr(m, "identifier") else str(m.id)
-                    break
-            if not model_id and models_list:
-                model_id = (
-                    models_list[0].identifier if hasattr(models_list[0], "identifier") else str(models_list[0].id)
-                )
+            if allowed_generation_models:
+                for gm in allowed_generation_models:
+                    if gm in registered_ids:
+                        model_id = gm
+                        break
+            if not model_id:
+                for m in models_list:
+                    if hasattr(m, "model_type") and getattr(m, "model_type", "") == "llm":
+                        model_id = m.identifier if hasattr(m, "identifier") else str(m.id)
+                        break
             if not model_id:
                 _ssl_logger.warning("No models available for LLM language detection.")
                 return None
@@ -187,7 +196,7 @@ def search_space_preparation(
             if not detected_code:
                 return None
             if detected_code == "en":
-                return None
+                return {"code": "en", "name": "English"}
 
             name = LANGUAGE_MAP.get(detected_code)
             if not name:
@@ -211,7 +220,7 @@ def search_space_preparation(
             return None
 
         sample = questions[:LANGUAGE_DETECTION_SAMPLE_SIZE]
-        return _detect_language_via_llm(sample, llm_client)
+        return _detect_language_via_llm(sample, llm_client, allowed_generation_models=generation_models)
 
     supported_metrics = ["faithfulness", "answer_correctness", "context_correctness"]
 

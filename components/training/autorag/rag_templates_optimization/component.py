@@ -616,14 +616,15 @@ def rag_templates_optimization(
     )
 
     if detected_language:
+        lang_code = detected_language.get("code", "")
         lang_name = detected_language.get("name", "")
-        if lang_name:
+        if lang_name and lang_code != "en":
             explicit_instruction = f"You MUST respond in {lang_name}."
-            sys_msg = f"{explicit_instruction} {_DEFAULT_SYSTEM_MSG}"
-            usr_msg = f"{_DEFAULT_USER_MSG}{explicit_instruction}"
             for fm in search_space["foundation_model"].values:
-                fm.system_message_text = sys_msg
-                fm.user_message_text = usr_msg
+                existing_sys = fm.system_message_text if fm.system_message_text else _DEFAULT_SYSTEM_MSG
+                existing_usr = str(fm.user_message_text) if fm.user_message_text else _DEFAULT_USER_MSG
+                fm.system_message_text = f"{explicit_instruction} {existing_sys}"
+                fm.user_message_text = f"{existing_usr}{explicit_instruction}"
             _ssl_logger.info(
                 "Set explicit language instruction on %d foundation model(s): %s",
                 len(search_space["foundation_model"].values),

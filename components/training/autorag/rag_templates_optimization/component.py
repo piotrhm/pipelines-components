@@ -780,7 +780,7 @@ def rag_templates_optimization(
                 "responses_template": {
                     "model": generation_model_id,
                     "stream": False,  # Not supported yet
-                    "store": True,  # Responses API default
+                    "store": False,  # OGX-client default (but ResponsesAPI default is True)
                     "input": "<user_query_placeholder>",
                     "instructions": generation_system_message_text,
                     "tools": [{"type": "file_search", "vector_store_ids": [evaluation_result.collection]}],

@@ -154,7 +154,9 @@ def search_space_preparation(
                     model_id = m.identifier if hasattr(m, "identifier") else str(m.id)
                     break
             if not model_id and models_list:
-                model_id = models_list[0].identifier if hasattr(models_list[0], "identifier") else str(models_list[0].id)
+                model_id = (
+                    models_list[0].identifier if hasattr(models_list[0], "identifier") else str(models_list[0].id)
+                )
             if not model_id:
                 _ssl_logger.warning("No models available for LLM language detection.")
                 return None

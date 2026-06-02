@@ -555,10 +555,13 @@ class TestMultilingualPromptOverrides:
     def _run(self, mocks, extracted_text, test_data, report, **kwargs):
         with (
             mock.patch.dict(sys.modules, mocks),
-            mock.patch.dict(os.environ, {
-                "OGX_CLIENT_BASE_URL": "https://ogx.example.com",
-                "OGX_CLIENT_API_KEY": "test-api-key",
-            }),
+            mock.patch.dict(
+                os.environ,
+                {
+                    "OGX_CLIENT_BASE_URL": "https://ogx.example.com",
+                    "OGX_CLIENT_API_KEY": "test-api-key",
+                },
+            ),
         ):
             rag_templates_optimization.python_func(
                 extracted_text=extracted_text,
@@ -574,14 +577,10 @@ class TestMultilingualPromptOverrides:
 
     def test_detected_language_sets_prompts_on_foundation_models(self, tmp_path):
         """When detected_language is present, foundation models get explicit language instruction."""
-        mocks, ext, td, report = self._setup_with_language(
-            tmp_path, detected_language={"code": "de", "name": "German"}
-        )
+        mocks, ext, td, report = self._setup_with_language(tmp_path, detected_language={"code": "de", "name": "German"})
         mock_fm = mock.MagicMock()
         mock_search_space = mock.MagicMock()
-        mock_search_space.__getitem__ = mock.MagicMock(
-            return_value=mock.MagicMock(values=[mock_fm])
-        )
+        mock_search_space.__getitem__ = mock.MagicMock(return_value=mock.MagicMock(values=[mock_fm]))
         mocks["ai4rag.search_space.src.search_space"].AI4RAGSearchSpace.return_value = mock_search_space
 
         with pytest.raises(_SentinelAbort):
@@ -596,9 +595,7 @@ class TestMultilingualPromptOverrides:
         mock_fm = mock.MagicMock()
         original_sys = mock_fm.system_message_text
         mock_search_space = mock.MagicMock()
-        mock_search_space.__getitem__ = mock.MagicMock(
-            return_value=mock.MagicMock(values=[mock_fm])
-        )
+        mock_search_space.__getitem__ = mock.MagicMock(return_value=mock.MagicMock(values=[mock_fm]))
         mocks["ai4rag.search_space.src.search_space"].AI4RAGSearchSpace.return_value = mock_search_space
 
         with pytest.raises(_SentinelAbort):

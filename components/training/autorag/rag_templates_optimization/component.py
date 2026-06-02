@@ -747,7 +747,9 @@ def rag_templates_optimization(
                     "distance_metric": (
                         embeddings.get("distance_metric", "cosine") if isinstance(embeddings, dict) else "cosine"
                     ),
-                    "embedding_params": embeddings.get("embedding_params", {"embedding_dimension": 768}),
+                    "embedding_params": {
+                        "embedding_dimension": embeddings.get("embedding_params", {}).get("embedding_dimension", None)
+                    },
                 },
                 "retrieval": {
                     "method": retrieval_method,

@@ -64,10 +64,15 @@ def main():
             try:
                 response = client.post(url, json=body_template, headers=headers)
                 response.raise_for_status()
-                assistant_last_message = [msg for msg in response.json()["output"][::-1] if msg["role"] == "assistant"]
-                output_text = [obj for obj in assistant_last_message[0]["content"] if obj["type"] == "output_text"]
-
-                print(output_text[0]["text"])
+                assistant_last_message = [msg for msg in response.json()["output"][::-1]
+                                          if msg.get("role") == "assistant"]
+                if assistant_last_message:
+                    output_text = [obj for obj in assistant_last_message[0]["content"] if obj["type"] == "output_text"]
+                    print(output_text[0]["text"])
+                else:
+                    print("It seems that the model did not return response in the expected format. "
+                          "Below is the raw response object:")
+                    print(response)
             except httpx.HTTPStatusError as e:
                 print(
                     f"HTTP {e.response.status_code}: {e.response.reason_phrase}",
@@ -78,10 +83,10 @@ def main():
                 print(f"Connection error: {e}", file=sys.stderr)
 
         except EOFError:  # Ctrl-D
-            print()
+            print("\nExiting..")
             break
         except KeyboardInterrupt: # Ctrl-C
-            print()
+            print("\nExiting..")
             break
 
         except Exception:

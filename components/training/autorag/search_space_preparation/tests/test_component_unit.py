@@ -292,16 +292,16 @@ class TestLanguageDetection:
         Lets prepare_search_space_with_ogx return a minimal mock search space,
         then the component writes the YAML report. We read it back to get detected_language.
         """
-        import json
-
-        import yaml
+        import pandas as pd
 
         mocks = _make_all_mocks()
 
+        benchmark_df = pd.DataFrame(
+            [{"question": "Was ist das?", "correct_answers": [["etwas"]], "correct_answer_document_ids": [["d"]]}]
+        )
         mock_pd = mock.MagicMock()
-        import pandas as pd
-
-        mock_pd.read_json = pd.read_json
+        mock_pd.read_json.return_value = benchmark_df
+        mock_pd.DataFrame = pd.DataFrame
         mocks["pandas"] = mock_pd
 
         if ogx_mod is None:
@@ -325,13 +325,7 @@ class TestLanguageDetection:
         mock_yaml.safe_load = mock.MagicMock(return_value={})
         mocks["yaml"] = mock_yaml
 
-        benchmark = [
-            {"question": "Was ist das?", "correct_answers": [["etwas"]], "correct_answer_document_ids": [["d"]]}
-        ]
-        test_data = tmp_path / "test_data.json"
-        test_data.write_text(json.dumps(benchmark))
-
-        test_data_art = mock.MagicMock(path=str(test_data))
+        test_data_art = mock.MagicMock(path=str(tmp_path / "test_data.json"))
         extracted_art = mock.MagicMock(path=str(tmp_path / "ext"))
         report_path = tmp_path / "report.yml"
         report_art = mock.MagicMock(path=str(report_path))

@@ -53,12 +53,19 @@ def to_finite_float(value: Any) -> float | None:
     return number
 
 
+def _normalize_metric_name(metric: str) -> str:
+    return (metric or "").strip().lstrip("-").upper()
+
+
 def filter_finite_metrics(metrics: dict[str, Any]) -> dict[str, float]:
     """Keep only finite scalar metric values (KFP-safe).
 
     Normalizes AutoGluon's "higher-is-better" convention by converting error metrics
     back to their natural positive form. AutoGluon negates error metrics like MAPE/RMSE/MAE
     in .evaluate() output, so this function multiplies them by -1 to restore standard signs.
+
+    Used for ``back_testing.json`` only. ``metrics.json`` keeps raw AutoGluon signs for
+    leaderboard compatibility.
     """
     cleaned: dict[str, float] = {}
     for key, value in metrics.items():
@@ -262,6 +269,23 @@ def _point_errors(actual: np.ndarray, predicted: np.ndarray) -> dict[str, float 
     return {"MAPE": mape, "RMSE": rmse, "MAE": mae}
 
 
+def _compute_metrics_from_forecast_data(forecast_rows: list[dict[str, Any]]) -> dict[str, float]:
+    """Compute error metrics from pre-generated forecast data rows.
+
+    Args:
+        forecast_rows: List of forecast dicts with "actual" and "predicted" keys
+
+    Returns:
+        Dict of computed metrics (MAPE, RMSE, MAE) with None values filtered out
+    """
+    paired = [r for r in forecast_rows if "actual" in r]
+    if not paired:
+        return {}
+    actual = np.array([r["actual"] for r in paired], dtype=float)
+    predicted = np.array([r["predicted"] for r in paired], dtype=float)
+    return {k: v for k, v in _point_errors(actual, predicted).items() if v is not None}
+
+
 def _item_window_metrics(
     predictions: pd.DataFrame,
     targets_window: pd.DataFrame,
@@ -275,13 +299,7 @@ def _item_window_metrics(
     This prevents silent metric loss when some actual values are NaN/Inf.
     """
     rows = _forecast_data_for_item(predictions, targets_window, item_id, target, prediction_length)
-    # Build both arrays from the same filtered subset (rows with valid actuals)
-    paired = [r for r in rows if "actual" in r]
-    if not paired:
-        return {}
-    actual = np.array([r["actual"] for r in paired], dtype=float)
-    predicted = np.array([r["predicted"] for r in paired], dtype=float)
-    return {k: v for k, v in _point_errors(actual, predicted).items() if v is not None}
+    return _compute_metrics_from_forecast_data(rows)
 
 
 def _average_metrics(metric_dicts: list[dict[str, float]]) -> dict[str, float]:
@@ -355,16 +373,39 @@ def _build_series_analysis(
     prediction_length: int,
     eval_metric: str,
 ) -> dict[str, Any]:
+    """Build series analysis with cached metrics and forecast data.
+
+    Pre-computes forecast data once, then derives metrics from it. This avoids
+    double computation: forecast data generation is the expensive operation
+    (DataFrame slicing, type conversion, bounds extraction), while metrics
+    computation from the generated rows is cheap (numpy array operations).
+    """
     item_ids: set[Any] = set()
     for targets_window in targets_windows:
         item_ids.update(_item_ids(targets_window))
 
+    # Cache structure: {(item_id, window_id): {"metrics": {...}, "forecast_data": [...]}}
+    cache: dict[tuple[Any, int], dict[str, Any]] = {}
     per_item_window_metrics: dict[Any, list[dict[str, float]]] = {item_id: [] for item_id in item_ids}
-    for predictions, targets_window in zip(predictions_windows, targets_windows, strict=True):
+
+    # Single pass: generate forecast data once, compute metrics from it
+    for window_id, (predictions, targets_window) in enumerate(
+        zip(predictions_windows, targets_windows, strict=True)
+    ):
         for item_id in item_ids:
-            metrics = _item_window_metrics(predictions, targets_window, item_id, target, prediction_length)
+            # Generate forecast data once
+            forecast_data = _forecast_data_for_item(
+                predictions, targets_window, item_id, target, prediction_length
+            )
+            # Compute metrics from the forecast data (no redundant generation)
+            metrics = _compute_metrics_from_forecast_data(forecast_data)
             if metrics:
                 per_item_window_metrics[item_id].append(metrics)
+                # Cache both for later use
+                cache[(item_id, window_id)] = {
+                    "metrics": metrics,
+                    "forecast_data": forecast_data,
+                }
 
     series_averages = {
         item_id: _average_metrics(metrics_list)
@@ -375,24 +416,20 @@ def _build_series_analysis(
     best_id, worst_id = _select_best_worst(series_averages, ranking_metric)
 
     def _series_payload(item_id: Any | None) -> dict[str, Any] | None:
+        """Build performer payload from cached data (no recomputation)."""
         if item_id not in series_averages:
             return None
         windows_payload = []
-        for window_id, (predictions, targets_window) in enumerate(
-            zip(predictions_windows, targets_windows, strict=True)
-        ):
-            window_metrics = _item_window_metrics(predictions, targets_window, item_id, target, prediction_length)
-            if not window_metrics:
-                continue
-            windows_payload.append(
-                {
-                    "window_id": window_id,
-                    "metrics": window_metrics,
-                    "forecast_data": _forecast_data_for_item(
-                        predictions, targets_window, item_id, target, prediction_length
-                    ),
-                }
-            )
+        for window_id in range(len(predictions_windows)):
+            cached = cache.get((item_id, window_id))
+            if cached:
+                windows_payload.append(
+                    {
+                        "window_id": window_id,
+                        "metrics": cached["metrics"],
+                        "forecast_data": cached["forecast_data"],
+                    }
+                )
         if not windows_payload:
             return None
         return {

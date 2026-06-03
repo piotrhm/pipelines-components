@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from unittest import mock
 
 import pandas as pd
@@ -12,6 +13,7 @@ from ..back_testing import (
     _forecast_data_for_item,
     _holdout_frame,
     _item_window_metrics,
+    _mean_prediction_column,
     _series_ranking_metric,
     build_back_testing_json,
     filter_finite_metrics,
@@ -50,6 +52,53 @@ class TestSerialization:
         # All values positive (natural error form)
         assert all(v > 0 for v in normalized.values())
 
+    def test_back_testing_normalizes_autogluon_signs(self):
+        """back_testing.json converts AutoGluon negated error metrics to natural positive form."""
+        raw_autogluon = {"MASE": -0.42, "MAPE": -5.0, "RMSE": -10.5}
+        assert filter_finite_metrics(raw_autogluon) == {
+            "MASE": 0.42,
+            "MAPE": 5.0,
+            "RMSE": 10.5,
+        }
+
+    def test_metrics_json_and_backtesting_use_different_sign_conventions(self):
+        """metrics.json keeps raw AutoGluon signs; back_testing.json normalizes to natural form."""
+        raw_autogluon = {"MASE": -0.42, "MAPE": -5.0, "RMSE": -10.5}
+        metrics_json_values = {
+            k: v
+            for k, v in raw_autogluon.items()
+            if isinstance(v, (int, float)) and math.isfinite(v)
+        }
+
+        timestamps = ["2025-01-01", "2025-01-02", "2025-01-03", "2025-01-04"]
+        train_data = _make_panel(["A"], timestamps, [100.0, 110.0, 120.0, 130.0])
+        window_targets = _holdout_frame(train_data, prediction_length=2)
+        predictions = pd.DataFrame({"mean": [121.0, 131.0]}, index=window_targets.loc["A"].index)
+
+        predictor = mock.MagicMock()
+        predictor.backtest_predictions.return_value = [predictions]
+        predictor.backtest_targets.return_value = [window_targets]
+        predictor.evaluate.return_value = raw_autogluon
+
+        payload = build_back_testing_json(
+            predictor,
+            model_name="DeepAR",
+            model_name_full="DeepAR_FULL",
+            train_data=train_data,
+            eval_metric="MASE",
+            target="target",
+            id_column="item_id",
+            timestamp_column="timestamp",
+            prediction_length=2,
+            num_val_windows=1,
+            metrics=list(raw_autogluon.keys()),
+        )
+
+        backtesting_values = payload["per_window_metrics"][0]["metrics"]
+        assert metrics_json_values == raw_autogluon
+        assert backtesting_values == filter_finite_metrics(raw_autogluon)
+        assert metrics_json_values != backtesting_values
+
     def test_serialize_timestamp_utc(self):
         """Timestamps serialize to ISO strings with UTC suffix."""
         assert serialize_timestamp(pd.Timestamp("2025-12-08T00:00:00Z")) == "2025-12-08T00:00:00Z"
@@ -82,6 +131,14 @@ class TestHoldoutHelpers:
         assert len(holdout) == 2
         assert holdout["target"].tolist() == [40.0, 50.0]
         assert not isinstance(holdout.index, pd.MultiIndex)
+
+    def test_holdout_frame_shorter_than_prediction_length(self):
+        """Holdout returns all available rows when the series is shorter than prediction_length."""
+        ts = ["2025-01-01", "2025-01-02"]
+        panel = _make_panel(["A"], ts, [1.0, 2.0])
+        holdout = _holdout_frame(panel, prediction_length=5)
+        assert len(holdout) == 2
+        assert holdout["target"].tolist() == [1.0, 2.0]
 
     def test_item_window_metrics_computes_mape(self):
         """Per-item window metrics include MAPE from point forecasts."""
@@ -124,6 +181,27 @@ class TestHoldoutHelpers:
         rows = _forecast_data_for_item(predictions, targets, "A", "target", prediction_length=1)
         assert "lower_bound" not in rows[0]
         assert "upper_bound" not in rows[0]
+
+    def test_forecast_data_skips_timestamp_missing_from_predictions(self):
+        """Forecast rows omit holdout timestamps with no matching prediction."""
+        timestamps = ["2025-01-03", "2025-01-04"]
+        targets = _make_panel(["A"], timestamps, [100.0, 200.0])
+        predictions = pd.DataFrame({"mean": [105.0]}, index=targets.index[:1])
+        rows = _forecast_data_for_item(predictions, targets, "A", "target", prediction_length=2)
+        assert len(rows) == 1
+        assert rows[0]["actual"] == 100.0
+        assert rows[0]["predicted"] == 105.0
+
+    def test_mean_prediction_column_warns_without_mean(self):
+        """A warning is logged when falling back from missing mean to a quantile column."""
+        from .. import back_testing
+
+        predictions = pd.DataFrame({0.1: [1.0], 0.9: [2.0]})
+        with mock.patch.object(back_testing.logger, "warning") as mock_warning:
+            col = _mean_prediction_column(predictions)
+        assert col == "0.1"
+        mock_warning.assert_called_once()
+        assert "quantile column" in mock_warning.call_args[0][0].lower()
 
     def test_forecast_data_capped_at_max_points(self):
         """Forecast rows never exceed MAX_FORECAST_POINTS_PER_WINDOW."""
@@ -197,12 +275,60 @@ class TestSeriesAnalysis:
         assert best == "A"
         assert worst == "B"
 
-        # Test with higher-is-better metric (would be R2, but we'll simulate)
-        # For our current metrics, we only have lower-is-better, but the logic should still work
-        series_averages_empty = {"A": {"MAPE": 5.0, "RMSE": 10.0}, "B": {"MAPE": 8.0}}  # B missing RMSE
+        # Test with higher-is-better metric (R2)
+        series_averages_higher = {"A": {"R2": 0.9}, "B": {}}
+        best, worst = _select_best_worst(series_averages_higher, "R2")
+        assert best == "A"
+        assert worst == "B"
+
+        # Missing lower-is-better metric still ranks as worst
+        series_averages_empty = {"A": {"MAPE": 5.0, "RMSE": 10.0}, "B": {"MAPE": 8.0}}
         best, worst = _select_best_worst(series_averages_empty, "RMSE")
         assert best == "A"
-        assert worst == "B"  # Missing RMSE should rank as worst
+        assert worst == "B"
+
+    def test_build_series_analysis_caches_computation(self):
+        """Series analysis generates forecast data once per (item, window), not twice."""
+        from unittest.mock import patch
+
+        timestamps = ["2025-01-01", "2025-01-02", "2025-01-03", "2025-01-04"]
+        train_data = _make_panel(["good", "bad"], timestamps, [100.0, 110.0, 120.0, 130.0])
+        window_targets = _holdout_frame(train_data, prediction_length=2)
+        good_preds = pd.DataFrame({"mean": [121.0, 131.0]}, index=window_targets.loc["good"].index)
+        bad_preds = pd.DataFrame({"mean": [200.0, 210.0]}, index=window_targets.loc["bad"].index)
+        predictions = pd.concat({"good": good_preds, "bad": bad_preds}, names=["item_id", "timestamp"])
+
+        # Patch the expensive forecast generation function to count calls
+        with patch(
+            "components.training.automl.shared.back_testing._forecast_data_for_item",
+            wraps=_forecast_data_for_item,
+        ) as mock_forecast:
+            analysis = _build_series_analysis(
+                [predictions],
+                [window_targets],
+                target="target",
+                prediction_length=2,
+                eval_metric="MAPE",
+            )
+
+            # _forecast_data_for_item should be called exactly once per (item, window) pair
+            # 2 items × 1 window = 2 calls total
+            # WITHOUT optimization, it would be called 4 times:
+            #   - 2 calls in first pass (computing metrics)
+            #   - 2 more calls when building best/worst payloads
+            assert mock_forecast.call_count == 2, (
+                f"Expected 2 calls (1 per item×window), got {mock_forecast.call_count}. "
+                "Double computation detected!"
+            )
+
+            # Verify analysis structure is still correct
+            assert analysis["num_series_evaluated"] == 2
+            assert analysis["best_performer"]["item_id"] == "good"
+            assert analysis["worst_performer"]["item_id"] == "bad"
+            # Verify forecast data is present in the output
+            assert len(analysis["best_performer"]["windows"]) == 1
+            assert "forecast_data" in analysis["best_performer"]["windows"][0]
+            assert len(analysis["best_performer"]["windows"][0]["forecast_data"]) > 0
 
 
 class TestBuildBackTestingJson:
@@ -351,6 +477,35 @@ class TestBuildBackTestingJson:
                 timestamp_column="timestamp",
                 prediction_length=1,
             )
+
+    def test_build_back_testing_json_with_zero_backtest_windows(self):
+        """Empty backtest window lists produce an empty but valid payload."""
+        timestamps = ["2025-01-01", "2025-01-02", "2025-01-03", "2025-01-04"]
+        train_data = _make_panel(["A"], timestamps, [100.0, 110.0, 120.0, 130.0])
+
+        predictor = mock.MagicMock()
+        predictor.backtest_predictions.return_value = []
+        predictor.backtest_targets.return_value = []
+
+        payload = build_back_testing_json(
+            predictor,
+            model_name="DeepAR",
+            model_name_full="DeepAR_FULL",
+            train_data=train_data,
+            eval_metric="MASE",
+            target="target",
+            id_column="item_id",
+            timestamp_column="timestamp",
+            prediction_length=2,
+            num_val_windows=3,
+        )
+
+        assert payload["num_val_windows"] == 0
+        assert payload["per_window_metrics"] == []
+        assert payload["series_analysis"]["num_series_evaluated"] == 0
+        assert payload["series_analysis"]["best_performer"] is None
+        assert payload["series_analysis"]["worst_performer"] is None
+        predictor.evaluate.assert_not_called()
 
     def test_single_time_series_no_multiindex(self):
         """Builder handles single time-series (non-MultiIndex) correctly."""

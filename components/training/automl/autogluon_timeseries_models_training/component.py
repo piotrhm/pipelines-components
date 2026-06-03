@@ -74,12 +74,15 @@ def autogluon_timeseries_models_training(
 
     logger = logging.getLogger(__name__)
 
-    from kfp_components.components.training.automl.shared.back_testing import (
-        build_back_testing_json,
-        filter_finite_metrics,
-    )
+    import inspect
+    import textwrap
+
+    from kfp_components.components.training.automl.shared.back_testing import build_back_testing_json
     from kfp_components.components.training.automl.shared.component_status import ComponentStatusTracker
     from kfp_components.components.training.automl.shared.run_status import shared_automl_dir
+    from kfp_components.components.training.automl.shared.timeseries_notebook_utils import (
+        fill_known_covariates_on_future_frame,
+    )
 
     status = ComponentStatusTracker(component_status.path, "autogluon_timeseries_models_training")
     with status:
@@ -331,9 +334,14 @@ def autogluon_timeseries_models_training(
                     excluded_model_types=["Chronos", "Chronos2", "Toto"],
                 )
                 metrics = predictor_refit.evaluate(test_ts, metrics=list(AVAILABLE_METRICS.keys()))
-                # Normalize AutoGluon's "higher-is-better" convention (negated error metrics)
-                # to match back_testing.json sign convention
-                metrics_dict = filter_finite_metrics(metrics)
+                # Keep raw AutoGluon evaluate() signs for metrics.json (higher-is-better / negated errors)
+                # so leaderboard_evaluation sorting stays correct. back_testing.json normalizes separately.
+                metrics_dict = {}
+                for k, v in metrics.items():
+                    if hasattr(v, "item"):
+                        v = float(v)
+                    if isinstance(v, (int, float)) and math.isfinite(v):
+                        metrics_dict[k] = v
 
                 if eval_metric not in metrics_dict:
                     raise ValueError(
@@ -381,6 +389,9 @@ def autogluon_timeseries_models_training(
                     "<REPLACE_ID_COLUMN>": id_column,
                     "<REPLACE_TIMESTAMP_COLUMN>": timestamp_column,
                     "<REPLACE_KNOWN_COVARIATES_NAMES>": str(known_covariates_names or []),
+                    "<REPLACE_FILL_KNOWN_COVARIATES_FUNC>": textwrap.dedent(
+                        inspect.getsource(fill_known_covariates_on_future_frame)
+                    ),
                 }
                 notebook = replace_placeholder_in_notebook(notebook, replacements)
 

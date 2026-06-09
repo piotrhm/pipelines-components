@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Optional
 
 from kfp import dsl
@@ -6,7 +7,7 @@ from kfp_components.utils.consts import AUTORAG_IMAGE  # pyright: ignore[reportM
 
 @dsl.component(
     base_image=AUTORAG_IMAGE,  # noqa: E501
-    embedded_artifact_path=("components/training/autorag/shared"),
+    embedded_artifact_path=str(Path(__file__).parents[1] / "shared"),
     install_kfp_package=False,
 )
 def rag_templates_optimization(
@@ -442,6 +443,8 @@ def rag_templates_optimization(
 
         mapping["TEST_DATA_KEY"] = test_data_key
         mapping["INPUT_DATA_KEY"] = input_data_key
+
+        mapping["OGX_CLIENT_BASE_URL"] = (os.environ.get("OGX_CLIENT_BASE_URL") or "").strip()
 
         return mapping
 

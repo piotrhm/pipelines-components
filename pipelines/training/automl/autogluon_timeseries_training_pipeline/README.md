@@ -60,7 +60,7 @@ prediction_length=14, top_n=3, )
 
 ## Metadata 🗂️
 
-- **Name**: autogluon_timeseries_training_pipeline
+- **Name**: autogluon-timeseries-training-pipeline
 - **Stability**: beta
 - **Managed**: Yes
 - **Dependencies**:

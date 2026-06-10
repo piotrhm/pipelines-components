@@ -1,5 +1,5 @@
 ---
-name: autogluon_timeseries_training_pipeline
+name: autogluon-timeseries-training-pipeline
 stability: beta  # New pipeline without proven track record
 managed: true
 dependencies:

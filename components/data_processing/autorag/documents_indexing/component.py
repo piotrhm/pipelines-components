@@ -45,11 +45,10 @@ def documents_indexing(
     from pathlib import Path
 
     import httpx
-    from ai4rag.rag.chunking import LangChainChunker, DoclingChunker
+    from ai4rag.rag.chunking import DoclingChunker, LangChainChunker
     from ai4rag.rag.embedding.ogx import OGXEmbeddingModel, OGXEmbeddingParams
     from ai4rag.rag.vector_store.ogx import OGXVectorStore
     from docling_core.types.doc.document import DoclingDocument
-    from langchain_core.documents import Document
     from ogx_client import APIConnectionError as OGXAPIConnectionError
     from ogx_client import OgxClient
 

@@ -37,17 +37,45 @@ def _mock_boto_modules():
     }
 
 
-def _docling_modules():
-    """Return mock modules for docling imports used in component.
+def _save_as_json_side_effect(path):
+    """Create a minimal JSON file at the given path (used by save_as_json mocks)."""
+    Path(str(path)).write_text('{"name": "mock"}')
 
-    The mocked DocumentConverter.convert() returns a result whose
-    export_to_markdown() produces a plain string so that output_file.write_text()
-    succeeds inside worker_process_document.
+
+def _make_docling_core_modules():
+    """Return mock modules for docling_core imports (DoclingDocument, DocItemLabel).
+
+    The mocked DoclingDocument constructor returns an object whose save_as_json()
+    creates a real file so that glob-based assertions in tests pass.
     """
+    mock_doc = mock.MagicMock()
+    mock_doc.save_as_json.side_effect = _save_as_json_side_effect
+    mock_docling_document_class = mock.MagicMock(return_value=mock_doc)
+    return {
+        "docling_core": mock.MagicMock(),
+        "docling_core.types": mock.MagicMock(),
+        "docling_core.types.doc": mock.MagicMock(),
+        "docling_core.types.doc.document": mock.MagicMock(DoclingDocument=mock_docling_document_class),
+        "docling_core.types.doc.labels": mock.MagicMock(),
+    }
+
+
+def _make_converter_doc_mock():
+    """Return a mock document whose save_as_json() creates a real file."""
+    doc = mock.MagicMock()
+    doc.save_as_json.side_effect = _save_as_json_side_effect
+    return doc
+
+
+def _docling_modules():
+    """Return mock modules for docling and docling_core imports used in component.
+
+    The mocked DocumentConverter.convert() returns a result whose document has a
+    save_as_json() that creates a real file, matching the component's new JSON output.
+    """
+    result_doc = _make_converter_doc_mock()
     mock_converter_instance = mock.MagicMock()
-    mock_converter_instance.convert.return_value = mock.MagicMock(
-        document=mock.MagicMock(export_to_markdown=mock.MagicMock(return_value="# text"))
-    )
+    mock_converter_instance.convert.return_value = mock.MagicMock(document=result_doc)
     mock_converter_class = mock.MagicMock(return_value=mock_converter_instance)
     return {
         "docling": mock.MagicMock(),
@@ -66,6 +94,7 @@ def _docling_modules():
             HTMLFormatOption=mock.MagicMock(),
             MarkdownFormatOption=mock.MagicMock(),
         ),
+        **_make_docling_core_modules(),
     }
 
 
@@ -271,9 +300,8 @@ class TestTextExtractionMultiFormatUnitTests:
         def capture_converter_init(*args, **kwargs):
             converter_init_args.update(kwargs)
             mock_converter_instance = mock.MagicMock()
-            mock_converter_instance.convert.return_value = mock.MagicMock(
-                document=mock.MagicMock(export_to_markdown=mock.MagicMock(return_value="# Test"))
-            )
+            doc = _make_converter_doc_mock()
+            mock_converter_instance.convert.return_value = mock.MagicMock(document=doc)
             return mock_converter_instance
 
         mock_docling_converter_class = mock.MagicMock(side_effect=capture_converter_init)
@@ -313,6 +341,7 @@ class TestTextExtractionMultiFormatUnitTests:
                     HTMLFormatOption=mock.MagicMock(),
                     MarkdownFormatOption=mock.MagicMock(),
                 ),
+                **_make_docling_core_modules(),
                 **_sync_multiprocess_modules(),
             },
         ):
@@ -354,9 +383,8 @@ class TestTextExtractionMultiFormatUnitTests:
 
         mock_converter_class = mock.MagicMock()
         mock_converter_instance = mock.MagicMock()
-        mock_converter_instance.convert.return_value = mock.MagicMock(
-            document=mock.MagicMock(export_to_markdown=mock.MagicMock(return_value="# Test"))
-        )
+        result_doc = _make_converter_doc_mock()
+        mock_converter_instance.convert.return_value = mock.MagicMock(document=result_doc)
         mock_converter_class.return_value = mock_converter_instance
 
         documents_descriptor_artifact = mock.MagicMock()
@@ -389,6 +417,7 @@ class TestTextExtractionMultiFormatUnitTests:
                     HTMLFormatOption=mock.MagicMock(),
                     MarkdownFormatOption=mock.MagicMock(),
                 ),
+                **_make_docling_core_modules(),
                 **_sync_multiprocess_modules(),
             },
         ):
@@ -404,7 +433,7 @@ class TestTextExtractionMultiFormatUnitTests:
 
     @mock.patch.dict("os.environ", MOCKED_ENV_VARIABLES)
     def test_txt_file_handling(self, tmp_path):
-        """Test that TXT files are copied directly without invoking docling converter."""
+        """Test that TXT files are wrapped in a DoclingDocument without invoking docling converter."""
         descriptor_dir = tmp_path / "descriptor"
         descriptor_dir.mkdir()
         descriptor = {
@@ -426,7 +455,8 @@ class TestTextExtractionMultiFormatUnitTests:
 
         def capture_convert_call(*args, **kwargs):
             converter_calls.append(args)
-            return mock.MagicMock(document=mock.MagicMock(export_to_markdown=mock.MagicMock(return_value="# Test")))
+            doc = _make_converter_doc_mock()
+            return mock.MagicMock(document=doc)
 
         mock_converter_instance = mock.MagicMock()
         mock_converter_instance.convert.side_effect = capture_convert_call
@@ -461,6 +491,7 @@ class TestTextExtractionMultiFormatUnitTests:
                     HTMLFormatOption=mock.MagicMock(),
                     MarkdownFormatOption=mock.MagicMock(),
                 ),
+                **_make_docling_core_modules(),
                 **_sync_multiprocess_modules(),
             },
         ):
@@ -472,10 +503,9 @@ class TestTextExtractionMultiFormatUnitTests:
         assert len(converter_calls) == 0
 
         output_dir = Path(extracted_text_artifact.path)
-        output_files = list(output_dir.glob("*.md"))
+        output_files = list(output_dir.glob("*.json"))
         assert len(output_files) == 1
-        assert output_files[0].name == "file1.txt.md"
-        assert output_files[0].read_text() == "This is a text file content"
+        assert output_files[0].name == "file1.txt.json"
 
 
 class TestMultiFormatProcessing:
@@ -488,11 +518,10 @@ class TestMultiFormatProcessing:
 
     @pytest.fixture
     def mock_docling_components(self):
-        """Create standard docling mocks with a converter that returns markdown strings."""
+        """Create standard docling mocks with a converter that saves JSON files."""
+        result_doc = _make_converter_doc_mock()
         mock_converter_instance = mock.MagicMock()
-        mock_converter_instance.convert.return_value = mock.MagicMock(
-            document=mock.MagicMock(export_to_markdown=mock.MagicMock(return_value="# Extracted Content"))
-        )
+        mock_converter_instance.convert.return_value = mock.MagicMock(document=result_doc)
         mock_converter_class = mock.MagicMock(return_value=mock_converter_instance)
 
         mock_input_format = mock.MagicMock()
@@ -572,6 +601,7 @@ class TestMultiFormatProcessing:
                     HTMLFormatOption=mock.MagicMock(),
                     MarkdownFormatOption=mock.MagicMock(),
                 ),
+                **_make_docling_core_modules(),
                 **_sync_multiprocess_modules(),
             },
         ):
@@ -581,9 +611,9 @@ class TestMultiFormatProcessing:
             )
 
         output_dir = Path(extracted_text_artifact.path)
-        output_files = list(output_dir.glob("*.md"))
+        output_files = list(output_dir.glob("*.json"))
         assert len(output_files) == 1, f"Expected 1 output file for {file_name}, found {len(output_files)}"
-        assert output_files[0].name == f"{file_name}.md"
+        assert output_files[0].name == f"{file_name}.json"
         if file_extension == ".txt":
             mock_docling_components["converter_instance"].convert.assert_not_called()
         else:
@@ -651,6 +681,7 @@ class TestMultiFormatProcessing:
                     HTMLFormatOption=mock.MagicMock(),
                     MarkdownFormatOption=mock.MagicMock(),
                 ),
+                **_make_docling_core_modules(),
                 **_sync_multiprocess_modules(),
             },
         ):
@@ -660,16 +691,16 @@ class TestMultiFormatProcessing:
             )
 
         output_dir = Path(extracted_text_artifact.path)
-        all_output_files = list(output_dir.glob("*.md"))
+        all_output_files = list(output_dir.glob("*.json"))
         assert len(all_output_files) == 6, f"Expected 6 output files, found {len(all_output_files)}"
 
         expected_files = {
-            "sample.pdf.md",
-            "sample.docx.md",
-            "sample.txt.md",
-            "sample.html.md",
-            "sample.md.md",
-            "sample.pptx.md",
+            "sample.pdf.json",
+            "sample.docx.json",
+            "sample.txt.json",
+            "sample.html.json",
+            "sample.md.json",
+            "sample.pptx.json",
         }
         actual_files = {f.name for f in all_output_files}
         assert actual_files == expected_files
@@ -728,6 +759,7 @@ class TestMultiFormatProcessing:
                     HTMLFormatOption=mock.MagicMock(),
                     MarkdownFormatOption=mock.MagicMock(),
                 ),
+                **_make_docling_core_modules(),
                 **_sync_multiprocess_modules(),
             },
         ):
@@ -737,6 +769,6 @@ class TestMultiFormatProcessing:
             )
 
         output_dir = Path(extracted_text_artifact.path)
-        output_files = list(output_dir.glob("*.md"))
+        output_files = list(output_dir.glob("*.json"))
         assert len(output_files) == 0, "Unsupported file types should not produce output"
         mock_docling_components["converter_instance"].convert.assert_not_called()

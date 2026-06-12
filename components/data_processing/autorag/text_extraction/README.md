@@ -6,14 +6,14 @@
 
 Text Extraction component.
 
-Reads the documents_descriptor JSON (from documents_discovery), fetches the listed documents from S3, and extracts text using the docling library.
+Reads the documents_descriptor JSON (from documents_discovery), fetches the listed documents from S3, and extracts text using the docling library. Results are persisted as DoclingDocument JSON files (one per input document).
 
 ## Inputs 📥
 
 | Parameter | Type | Default | Description |
 | --------- | ---- | ------- | ----------- |
 | `documents_descriptor` | `dsl.Input[dsl.Artifact]` | `None` | Input artifact containing documents_descriptor.json with bucket, prefix, and documents list. |
-| `extracted_text` | `dsl.Output[dsl.Artifact]` | `None` | Output artifact where the extracted text content will be stored. |
+| `extracted_text` | `dsl.Output[dsl.Artifact]` | `None` | Output artifact directory where DoclingDocument JSON files will be written. |
 | `error_tolerance` | `Optional[float]` | `None` | Fraction of documents (0.0–1.0) allowed to fail without raising an error. None (the default) means zero tolerance — any failure raises immediately after all documents are processed. 0.1 means up to 10 % of documents may fail. Exceeding the threshold raises RuntimeError with a summary of up to 10 failing documents. |
 | `max_extraction_workers` | `Optional[int]` | `None` | Number of parallel worker processes used for text extraction. Each worker loads a full docling DocumentConverter into memory (ONNX models, layout detection, etc.), so this should be kept low to avoid out-of-memory issues. Defaults to 4. Set to None to use all available CPU cores. Set to 1 to disable parallelism. |
 

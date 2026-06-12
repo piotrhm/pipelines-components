@@ -49,6 +49,10 @@ def _make_all_mocks():
         "ai4rag.rag.embedding.ogx",
         "ai4rag.rag.vector_store",
         "ai4rag.rag.vector_store.ogx",
+        "docling_core",
+        "docling_core.types",
+        "docling_core.types.doc",
+        "docling_core.types.doc.document",
         "langchain_core",
         "langchain_core.documents",
         "langchain_text_splitters",
@@ -77,7 +81,10 @@ def _patch_indexing_dependencies():
     mods = {
         "ai4rag": mock.MagicMock(),
         "ai4rag.rag": mock.MagicMock(),
-        "ai4rag.rag.chunking": mock.MagicMock(LangChainChunker=mock_chunker_cls),
+        "ai4rag.rag.chunking": mock.MagicMock(
+            DoclingChunker=mock_chunker_cls,
+            LangChainChunker=mock_chunker_cls,
+        ),
         "ai4rag.rag.embedding": mock.MagicMock(),
         "ai4rag.rag.embedding.ogx": mock.MagicMock(
             OGXEmbeddingModel=mock_ogx_embedding_model,
@@ -87,6 +94,10 @@ def _patch_indexing_dependencies():
         "ai4rag.rag.vector_store.ogx": mock.MagicMock(
             OGXVectorStore=mock.MagicMock(return_value=mock_ogx_vectorstore),
         ),
+        "docling_core": mock.MagicMock(),
+        "docling_core.types": mock.MagicMock(),
+        "docling_core.types.doc": mock.MagicMock(),
+        "docling_core.types.doc.document": mock.MagicMock(),
         "langchain_core": mock.MagicMock(),
         "langchain_core.documents": mock.MagicMock(Document=mock_document),
         "httpx": _make_httpx_module(),
@@ -366,11 +377,11 @@ class TestSSLFallbackDocumentsIndexing:
         mock_vectorstore = mock.MagicMock()
         mocks["ai4rag.rag.vector_store.ogx"].OGXVectorStore.return_value = mock_vectorstore
 
-        # Write 3 .md files; use batch_size=2 → 2 batches
+        # Write 3 .json files; use batch_size=2 → 2 batches
         extracted_text_dir = tmp_path / "extracted"
         extracted_text_dir.mkdir()
         for i in range(3):
-            (extracted_text_dir / f"doc{i}.md").write_text(f"content {i}", encoding="utf-8")
+            (extracted_text_dir / f"doc{i}.json").write_text(f'{{"name": "doc{i}"}}', encoding="utf-8")
 
         extracted_text = mock.MagicMock()
         extracted_text.path = str(extracted_text_dir)

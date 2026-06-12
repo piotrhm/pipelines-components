@@ -17,11 +17,13 @@ def text_extraction(
 
     Reads the documents_descriptor JSON (from documents_discovery), fetches
     the listed documents from S3, and extracts text using the docling library.
+    Results are persisted as DoclingDocument JSON files (one per input document).
 
     Args:
         documents_descriptor: Input artifact containing
             documents_descriptor.json with bucket, prefix, and documents list.
-        extracted_text: Output artifact where the extracted text content will be stored.
+        extracted_text: Output artifact directory where DoclingDocument JSON files
+            will be written.
         error_tolerance: Fraction of documents (0.0–1.0) allowed to fail without
             raising an error. None (the default) means zero tolerance — any failure
             raises immediately after all documents are processed. 0.1 means up to
@@ -214,29 +216,37 @@ def text_extraction(
         )
 
     def worker_process_document(file_path_str: str, output_dir_str: str) -> tuple[bool, str | None]:
-        """Convert a single document to Markdown and write it to the output directory.
+        """Convert a single document to a DoclingDocument JSON file in the output directory.
 
-        Plain-text (.txt) files are copied as-is without invoking docling.
+        Plain-text (.txt) files are wrapped in a minimal DoclingDocument.
         All other supported formats are converted via the DocumentConverter
         that was created by the multiprocessing pool initializer in this process.
+
+        The resulting DoclingDocument's ``name`` field is set to the original
+        filename including its suffix (e.g. ``report.pdf``).
 
         Args:
             file_path_str: Absolute path to the local input file.
             output_dir_str: Absolute path to the directory where the resulting
-                Markdown file will be written (named <original_filename>.md).
+                JSON file will be written (named ``<original_filename>.json``).
 
         Returns:
             (True, None) on success; (False, error_message) on failure where
             error_message is either a full traceback string or a plain description.
         """
+        from docling_core.types.doc.document import DoclingDocument
+        from docling_core.types.doc.labels import DocItemLabel
+
         worker_log = logging.getLogger("text_extraction_worker")
         start_time = time.perf_counter()
         try:
             input_file = Path(file_path_str)
             output_dir = Path(output_dir_str)
-            output_file = output_dir / f"{input_file.name}.md"
+            output_file = output_dir / f"{input_file.name}.json"
             if input_file.suffix.lower() == ".txt":
-                output_file.write_text(input_file.read_text(encoding="utf-8"), encoding="utf-8")
+                doc = DoclingDocument(name=input_file.name)
+                doc.add_text(label=DocItemLabel.TEXT, text=input_file.read_text(encoding="utf-8"))
+                doc.save_as_json(output_file)
                 return True, None
 
             converter = getattr(sys.modules[__name__], "_mp_worker_converter", None)
@@ -252,7 +262,8 @@ def text_extraction(
                 "pid=%s docling convert start: %s (%.1f MiB on disk)", os.getpid(), input_file.name, file_size_mib
             )
             conversion_result = converter.convert(input_file)
-            output_file.write_text(conversion_result.document.export_to_markdown(), encoding="utf-8")
+            conversion_result.document.name = input_file.name
+            conversion_result.document.save_as_json(output_file)
             worker_log.info(
                 "pid=%s docling convert done: %s -> %s (%.1fs)",
                 os.getpid(),

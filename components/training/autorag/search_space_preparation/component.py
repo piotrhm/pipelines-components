@@ -70,7 +70,7 @@ def search_space_preparation(
         prepare_search_space_with_ogx,
     )
     from ai4rag.search_space.src.search_space import AI4RAGSearchSpace
-    from langchain_core.documents import Document
+    from docling_core.types.doc.document import DoclingDocument
     from ogx_client import APIConnectionError as OGXAPIConnectionError
     from ogx_client import OgxClient
 
@@ -239,37 +239,26 @@ def search_space_preparation(
     if metric and metric not in supported_metrics:
         raise ValueError(f"Metric {metric} is not supported. Supported metrics are {supported_metrics}.")
 
-    def load_as_langchain_doc(path: str | Path) -> list[Document]:
-        """Given path to a text-based file or a folder thereof load everything to memory.
+    def load_as_docling_doc(path: str | Path) -> list[DoclingDocument]:
+        """Load DoclingDocument JSON files from a path.
 
         Args:
-            path: str | Path
-                A local path to either a text file or a folder of text files.
+            path: A local path to either a single DoclingDocument JSON file
+                or a folder containing such files.
 
-        Returns":
-
-        list[Document]
-            A list of langchain `Document` objects.
+        Returns:
+            A list of ``DoclingDocument`` instances.
         """
         if isinstance(path, str):
             path = Path(path)
 
-        documents = []
+        documents: list[DoclingDocument] = []
         if path.is_dir():
-            for doc_path in path.iterdir():
-                with doc_path.open("r", encoding="utf-8") as doc:
-                    doc_id = doc_path.stem if doc_path.suffix == ".md" else doc_path.name
-                    documents.append(
-                        Document(
-                            page_content=doc.read(),
-                            metadata={"document_id": doc_id},
-                        )
-                    )
-
+            for doc_path in sorted(path.iterdir()):
+                if doc_path.is_file() and doc_path.suffix.lower() == ".json":
+                    documents.append(DoclingDocument.load_from_json(doc_path))
         elif path.is_file():
-            doc_id = path.stem if path.suffix == ".md" else path.name
-            with path.open("r", encoding="utf-8") as doc:
-                documents.append(Document(page_content=doc.read(), metadata={"document_id": doc_id}))
+            documents.append(DoclingDocument.load_from_json(path))
 
         return documents
 
@@ -325,7 +314,7 @@ def search_space_preparation(
     benchmark_df = pd.read_json(Path(test_data.path))
     detected_language = _detect_benchmark_language(benchmark_df, llm_client=client)
     benchmark_data = BenchmarkData(benchmark_df)
-    documents = load_as_langchain_doc(extracted_text.path)
+    documents = load_as_docling_doc(extracted_text.path)
 
     if (
         len(search_space["foundation_model"].values) > TOP_N_GENERATION_MODELS

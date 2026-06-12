@@ -21,13 +21,14 @@ def documents_indexing(
 ):
     """Index extracted text into a vector store with optional batch processing.
 
-    Reads markdown files from extracted_text, chunks them, embeds via OGX,
-    and adds them to the vector store. When batch_size > 0, processes documents
-    in batches to limit memory use and allow progress on large inputs.
+    Reads DoclingDocument JSON files from extracted_text, chunks them, embeds via
+    OGX, and adds them to the vector store. When batch_size > 0, processes
+    documents in batches to limit memory use and allow progress on large inputs.
 
     Args:
         embedding_model_id: Embedding model ID used for the vector store.
-        extracted_text: Input artifact (folder) containing .md files from text extraction.
+        extracted_text: Input artifact (folder) containing DoclingDocument JSON
+            files from text extraction.
         vector_io_provider_id: OGX provider ID for the vector database.
         embedding_params: Optional embedding parameters.
         distance_metric: Vector distance metric (e.g. "cosine").
@@ -44,9 +45,10 @@ def documents_indexing(
     from pathlib import Path
 
     import httpx
-    from ai4rag.rag.chunking import LangChainChunker
+    from ai4rag.rag.chunking import LangChainChunker, DoclingChunker
     from ai4rag.rag.embedding.ogx import OGXEmbeddingModel, OGXEmbeddingParams
     from ai4rag.rag.vector_store.ogx import OGXVectorStore
+    from docling_core.types.doc.document import DoclingDocument
     from langchain_core.documents import Document
     from ogx_client import APIConnectionError as OGXAPIConnectionError
     from ogx_client import OgxClient
@@ -87,7 +89,7 @@ def documents_indexing(
     logger.addHandler(handler)
 
     supported_distance_metrics = ("cosine", "euclidean")
-    supported_chunking_methods = ("recursive",)
+    supported_chunking_methods = ("recursive", "hybrid")
     supported_chunks_sizes_range = (128, 2048)
 
     if not vector_io_provider_id or not vector_io_provider_id.strip():
@@ -138,7 +140,7 @@ def documents_indexing(
     )
 
     base = Path(extracted_text.path)
-    paths = sorted(p for p in base.iterdir() if p.is_file() and p.suffix.lower() == ".md")
+    paths = sorted(p for p in base.iterdir() if p.is_file() and p.suffix.lower() == ".json")
     total_documents = len(paths)
     logger.info("Found %s documents to index", total_documents)
 
@@ -146,7 +148,10 @@ def documents_indexing(
         logger.warning("No documents found in %s", extracted_text.path)
         return
 
-    chunker = LangChainChunker(method=chunking_method, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    if chunking_method == "hybrid":
+        chunker = DoclingChunker(max_tokens=chunk_size)
+    else:
+        chunker = LangChainChunker(method=chunking_method, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     embedding_model = OGXEmbeddingModel(client=client, model_id=embedding_model_id, params=params)
 
     collection_name_param = {"reuse_collection_name": collection_name} if collection_name is not None else {}
@@ -163,13 +168,9 @@ def documents_indexing(
 
     for start in range(0, total_documents, effective_batch_size):
         batch_paths = paths[start : start + effective_batch_size]
-        batch_documents = [
-            Document(
-                page_content=p.read_text(encoding="utf-8", errors="replace"),
-                metadata={"document_id": p.stem},
-            )
-            for p in batch_paths
-        ]
+        batch_documents = []
+        for p in batch_paths:
+            batch_documents.append(DoclingDocument.load_from_json(p))
         batch_chunks = chunker.split_documents(batch_documents)
         ogx_vectorstore.add_documents(batch_chunks)
         total_chunks += len(batch_chunks)

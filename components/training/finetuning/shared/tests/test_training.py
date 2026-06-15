@@ -7,7 +7,7 @@ from unittest import mock
 
 import pytest
 
-from ..training import _log_job_details, wait_for_training_job
+from ..training import _log_job_details, compute_nproc, safe_int, select_runtime, wait_for_training_job
 
 
 @dataclass
@@ -201,3 +201,101 @@ class TestSharedTrainingUnitTests:
 
         with pytest.raises(RuntimeError, match=match):
             wait_for_training_job(mock_client, "test-job", log)
+
+
+class TestSafeInt:
+    """Tests for safe_int."""
+
+    def test_none_returns_default(self):
+        assert safe_int(None, 42) == 42
+
+    def test_int_passthrough(self):
+        assert safe_int(7, 0) == 7
+
+    def test_string_int(self):
+        assert safe_int("10", 0) == 10
+
+    def test_string_with_whitespace(self):
+        assert safe_int("  5  ", 0) == 5
+
+    def test_empty_string_returns_default(self):
+        assert safe_int("", 99) == 99
+
+    def test_zero(self):
+        assert safe_int(0, 42) == 0
+
+    def test_float_string_raises(self):
+        with pytest.raises(ValueError):
+            safe_int("3.14", 0)
+
+
+class TestSelectRuntime:
+    """Tests for select_runtime."""
+
+    def test_finds_matching_runtime(self, log):
+        rt = mock.MagicMock()
+        rt.name = "training-hub"
+        client = mock.MagicMock()
+        client.list_runtimes.return_value = [rt]
+
+        result = select_runtime(client, log)
+        assert result is rt
+
+    def test_finds_custom_named_runtime(self, log):
+        rt1 = mock.MagicMock()
+        rt1.name = "other"
+        rt2 = mock.MagicMock()
+        rt2.name = "my-runtime"
+        client = mock.MagicMock()
+        client.list_runtimes.return_value = [rt1, rt2]
+
+        result = select_runtime(client, log, runtime_name="my-runtime")
+        assert result is rt2
+
+    def test_raises_when_not_found(self, log):
+        client = mock.MagicMock()
+        client.list_runtimes.return_value = []
+
+        with pytest.raises(RuntimeError, match="not found"):
+            select_runtime(client, log)
+
+    def test_raises_when_no_match(self, log):
+        rt = mock.MagicMock()
+        rt.name = "wrong-name"
+        client = mock.MagicMock()
+        client.list_runtimes.return_value = [rt]
+
+        with pytest.raises(RuntimeError, match="training-hub.*not found"):
+            select_runtime(client, log)
+
+
+class TestComputeNproc:
+    """Tests for compute_nproc."""
+
+    def test_auto_uses_gpu_count(self):
+        np, nn = compute_nproc(4, "auto", num_workers=2)
+        assert np == 4
+        assert nn == 2
+
+    def test_auto_case_insensitive(self):
+        np, _ = compute_nproc(8, "AUTO")
+        assert np == 8
+
+    def test_explicit_nproc(self):
+        np, nn = compute_nproc(4, "2", num_workers=3)
+        assert np == 2
+        assert nn == 3
+
+    def test_single_node_forces_nnodes_1(self):
+        np, nn = compute_nproc(4, "auto", num_workers=8, single_node=True)
+        assert np == 4
+        assert nn == 1
+
+    def test_min_values_clamped_to_1(self):
+        np, nn = compute_nproc(0, "0", num_workers=0)
+        assert np == 1
+        assert nn == 1
+
+    def test_default_workers(self):
+        _, nn = compute_nproc(1, "auto")
+        assert nn == 1

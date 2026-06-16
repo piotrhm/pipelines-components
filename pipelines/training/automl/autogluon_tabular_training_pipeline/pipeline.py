@@ -206,23 +206,7 @@ def autogluon_tabular_training_pipeline(
         preset=preset,
         eval_metric=eval_metric,
     )
-    with dsl.If(preset == "speed"):
-        training_task_sp = autogluon_models_training(**_training_kwargs)
-        training_task_sp.set_caching_options(False)
-        training_task_sp.set_cpu_request("8").set_memory_request("32Gi").set_cpu_limit(MAX_CPUS).set_memory_limit(
-            MAX_MEMORY
-        )
-
-        leaderboard_evaluation_task_sp = leaderboard_evaluation(
-            models_artifact=training_task_sp.outputs["models_artifact"],
-            eval_metric=training_task_sp.outputs["eval_metric"],
-        )
-        leaderboard_evaluation_task_sp.set_caching_options(False)
-        leaderboard_evaluation_task_sp.set_cpu_request("1").set_memory_request("4Gi").set_cpu_limit(
-            MAX_CPUS
-        ).set_memory_limit(MAX_MEMORY)
-
-    with dsl.Else():
+    with dsl.If(preset == "balanced"):
         training_task_bl = autogluon_models_training(**_training_kwargs)
         training_task_bl.set_caching_options(False)
         training_task_bl.set_cpu_request("16").set_memory_request("64Gi").set_cpu_limit(MAX_CPUS).set_memory_limit(
@@ -235,6 +219,22 @@ def autogluon_tabular_training_pipeline(
         )
         leaderboard_evaluation_task_bl.set_caching_options(False)
         leaderboard_evaluation_task_bl.set_cpu_request("1").set_memory_request("4Gi").set_cpu_limit(
+            MAX_CPUS
+        ).set_memory_limit(MAX_MEMORY)
+
+    with dsl.Else():
+        training_task_sp = autogluon_models_training(**_training_kwargs)
+        training_task_sp.set_caching_options(False)
+        training_task_sp.set_cpu_request("8").set_memory_request("32Gi").set_cpu_limit(MAX_CPUS).set_memory_limit(
+            MAX_MEMORY
+        )
+
+        leaderboard_evaluation_task_sp = leaderboard_evaluation(
+            models_artifact=training_task_sp.outputs["models_artifact"],
+            eval_metric=training_task_sp.outputs["eval_metric"],
+        )
+        leaderboard_evaluation_task_sp.set_caching_options(False)
+        leaderboard_evaluation_task_sp.set_cpu_request("1").set_memory_request("4Gi").set_cpu_limit(
             MAX_CPUS
         ).set_memory_limit(MAX_MEMORY)
 

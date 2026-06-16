@@ -6,13 +6,19 @@ import math
 from pathlib import Path
 from typing import Any
 
-import matplotlib.dates as mdates
-import matplotlib.pyplot as plt
 import pandas as pd
 
 _ACCENT = "#EE0000"
 _NEUTRAL = "#161616"
 _CUTOFF = "gray"
+
+
+def _matplotlib():
+    """Import matplotlib on demand (same pattern as ROC/PR cells in tabular notebooks)."""
+    import matplotlib.dates as mdates
+    import matplotlib.pyplot as plt
+
+    return plt, mdates
 
 
 def _normalize_metric(metric: str) -> str:
@@ -98,10 +104,7 @@ def _show_overall_backtest_summary(
         return
     window_count = len(per_window_metrics)
     window_label = "window" if window_count == 1 else "windows"
-    summary = (
-        f"Overall {eval_metric} (mean across {window_count} validation {window_label}, all series): "
-        f"{overall:.6g}"
-    )
+    summary = f"Overall {eval_metric} (mean across {window_count} validation {window_label}, all series): {overall:.6g}"
     if num_series_evaluated is not None:
         summary += f" | Series evaluated: {num_series_evaluated}"
     print(summary)
@@ -132,7 +135,8 @@ def _show_per_window_metrics(
     )
 
 
-def _style_date_axis(ax: plt.Axes) -> None:
+def _style_date_axis(ax: Any) -> None:
+    plt, mdates = _matplotlib()
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d"))
     ax.tick_params(axis="x", labelsize=8, rotation=45)
     plt.setp(ax.get_xticklabels(), ha="right")
@@ -149,14 +153,14 @@ def _interval_label(frame: pd.DataFrame) -> str:
     return "10%-90% interval"
 
 
-def _draw_cutoff(ax: plt.Axes, cutoff_start: str | None) -> None:
+def _draw_cutoff(ax: Any, cutoff_start: str | None) -> None:
     if not cutoff_start:
         return
     ax.axvline(pd.to_datetime(cutoff_start), color=_CUTOFF, linestyle="--", alpha=0.7, label="Cutoff")
 
 
 def _draw_forecast(
-    ax: plt.Axes,
+    ax: Any,
     rows: list[dict[str, Any]],
     *,
     title: str,
@@ -200,6 +204,7 @@ def render_back_testing_charts(back_testing: dict[str, Any]) -> None:
     )
 
     plotted_ids: set[Any] = set()
+    plt, _ = _matplotlib()
     for heading, role in (("Best", "best_performer"), ("Worst", "worst_performer")):
         performer = series_analysis.get(role)
         if not performer:

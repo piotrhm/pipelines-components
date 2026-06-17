@@ -19,6 +19,7 @@ def autogluon_timeseries_models_training(
     run_id: str,
     models_artifact: dsl.Output[dsl.Model],
     extra_train_data_path: str,
+    html_artifact: dsl.Output[dsl.HTML],
     component_status: dsl.Output[dsl.Artifact],
     sample_rows: str = "[]",
     sampling_config: Optional[dict] = None,
@@ -33,6 +34,7 @@ def autogluon_timeseries_models_training(
     predictor_path=str,
     eval_metric=str,
     model_config=dict,
+    best_model_name=str,
 ):
     """Train, select, and full-refit top N AutoGluon timeseries models.
 
@@ -41,8 +43,8 @@ def autogluon_timeseries_models_training(
     the selection training data, ranks them on the test set, then sequentially refits
     the top N models on full train data (selection split + extra split).
 
-    Refit outputs for all selected models are written under one ``models_artifact`` in
-    a layout compatible with ``autogluon_leaderboard_evaluation``.
+    Refit outputs for all selected models are written under one ``models_artifact``,
+    and a ranked HTML leaderboard is written to ``html_artifact``.
 
     Args:
         target: Name of the target column to forecast.
@@ -56,6 +58,7 @@ def autogluon_timeseries_models_training(
         run_id: Pipeline run id used in generated notebook placeholders.
         models_artifact: Combined output artifact containing all refitted models.
         extra_train_data_path: Path to extra train split for full refit.
+        html_artifact: Output HTML artifact containing the ranked leaderboard page.
         sample_rows: Sample rows JSON string used in generated notebook placeholders.
         sampling_config: Optional sampling config stored in artifact metadata.
         split_config: Optional split config stored in artifact metadata.
@@ -263,12 +266,14 @@ def autogluon_timeseries_models_training(
                 predictor_path=str,
                 eval_metric=str,
                 model_config=dict,
+                best_model_name=str,
             )
             return outputs(
                 top_models=top_models,
                 predictor_path=str(predictor_path),
                 eval_metric=eval_metric,
                 model_config=model_config,
+                best_model_name="",
             )
         from autogluon.timeseries.metrics import AVAILABLE_METRICS
         from autogluon.timeseries.models.ensemble import AbstractTimeSeriesEnsembleModel
@@ -457,6 +462,63 @@ def autogluon_timeseries_models_training(
             eval_metric=eval_metric,
         )
 
+        # Phase C: leaderboard generation - uses models_metadata already built in the refit loop
+        status.record("build_leaderboard", "started")
+
+        import importlib.resources
+
+        from kfp_components.components.training.automl.shared.leaderboard_utils import (
+            _build_leaderboard_html,
+            _build_leaderboard_table,
+            _round_metrics,
+        )
+
+        eval_results_by_model = {m["name"]: m["metrics"]["test_data"] for m in models_metadata}
+        base_uri = models_artifact.uri.rstrip("/")
+        leaderboard_rows = []
+        for model_name_full in model_names_full:
+            model_uri = f"{base_uri}/{model_name_full}"
+            leaderboard_rows.append(
+                {
+                    "model": model_name_full,
+                    **_round_metrics(eval_results_by_model[model_name_full]),
+                    "notebook": f"{model_uri}/notebooks/automl_predictor_notebook.ipynb",
+                    "predictor": f"{model_uri}/predictor",
+                }
+            )
+
+        leaderboard_df = pd.DataFrame(leaderboard_rows).sort_values(by=eval_metric, ascending=False)
+        n = len(leaderboard_df)
+        leaderboard_df.index = pd.RangeIndex(start=1, stop=n + 1, name="rank")
+        html_table = _build_leaderboard_table(leaderboard_df)
+        best_model_name = str(leaderboard_df.iloc[0]["model"])
+
+        _template_ref = (
+            importlib.resources.files("kfp_components.components.training.automl.shared")
+            / "leaderboard_html_template.html"
+        )
+        with importlib.resources.as_file(_template_ref) as template_path:
+            html_content = _build_leaderboard_html(
+                template_path=template_path,
+                table_html=html_table,
+                eval_metric=eval_metric,
+                best_model_name=best_model_name,
+                num_models=n,
+            )
+        with open(html_artifact.path, "w", encoding="utf-8") as f:
+            f.write(html_content)
+
+        html_artifact.metadata["data"] = leaderboard_df.to_dict()
+        html_artifact.metadata["display_name"] = "automl_leaderboard"
+        status.record(
+            "build_leaderboard",
+            "completed",
+            best_model=best_model_name,
+            model_count=n,
+        )
+
+        component_status.metadata["display_name"] = "Timeseries Models Training Status"
+
         models_artifact.metadata["model_names"] = json.dumps(model_names_full)
         models_artifact.metadata["context"] = {
             "data_config": {
@@ -464,6 +526,7 @@ def autogluon_timeseries_models_training(
                 "split_config": split_config,
             },
             "model_config": model_config,
+            "best_model_name": best_model_name,
             "models": models_metadata,
         }
 
@@ -473,12 +536,14 @@ def autogluon_timeseries_models_training(
             predictor_path=str,
             eval_metric=str,
             model_config=dict,
+            best_model_name=str,
         )
         return outputs(
             top_models=top_models,
             predictor_path=str(predictor_path),
             eval_metric=eval_metric,
             model_config=model_config,
+            best_model_name=best_model_name,
         )
 
 

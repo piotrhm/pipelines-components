@@ -26,8 +26,6 @@ written to the PVC workspace under ``{workspace_path}/datasets/``. For classific
 2. **Model Training & Refitting**: Trains multiple AutoGluon models on the *selection train* data using stacking (1 level) and bagging (4 folds). All models are evaluated on the test set and ranked by performance. The top N models are selected and refitted sequentially on the full training data via
 ``refit_full``. Each refitted model is saved with a ``_FULL`` suffix and optimized for deployment. All model artifacts are stored under a single output artifact, avoiding a ``ParallelFor`` loop in the pipeline.
 
-3. **Leaderboard Evaluation**: Reads pre-computed metrics from the combined models artifact and generates an HTML-formatted leaderboard ranking models by their performance metrics for comparison and selection.
-
 **Two-Stage Training Benefits:**
 
 - **Efficient Exploration:** Initial model training uses a smaller selection-train split with efficient ensembling rather than expensive hyperparameter optimization.

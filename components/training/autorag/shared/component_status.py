@@ -10,7 +10,7 @@ Usage:
 
     status = component_status_tracker(component_status, "test_data_loader")
     with status:
-        with status.stage("download_and_sample"):
+        with status.stage("load_benchmark"):
             ...
 """
 

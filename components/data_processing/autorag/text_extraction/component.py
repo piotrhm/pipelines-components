@@ -359,7 +359,7 @@ def text_extraction(
     with status:
         descriptor_path = Path(documents_descriptor.path) / DOCUMENTS_DESCRIPTOR_FILENAME
 
-        with status.stage("load_descriptor"):
+        with status.stage("extract_documents"):
             if not descriptor_path.exists():
                 raise FileNotFoundError(f"documents_descriptor.json not found at {descriptor_path}")
 
@@ -390,7 +390,6 @@ def text_extraction(
                 logger.info("No documents to process.")
                 return
 
-        with status.stage("extract_documents"):
             documents = sorted(documents, key=lambda d: d.get("size_bytes", 0), reverse=True)
 
             if max_extraction_workers is not None:

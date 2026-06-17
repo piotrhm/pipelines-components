@@ -86,7 +86,7 @@ def documents_discovery(
     _spec.loader.exec_module(_status_module)
     status = _status_module.bootstrap_status_tracker(embedded_artifact, component_status, "documents_discovery")
     with status:
-        with status.stage("validate_inputs"):
+        with status.stage("discover_documents"):
             s3_creds = {k: os.environ.get(k) for k in ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_S3_ENDPOINT"]}
             for k, v in s3_creds.items():
                 if v is None:
@@ -105,7 +105,6 @@ def documents_discovery(
                     verify=verify,
                 )
 
-        with status.stage("list_and_sample"):
             # Use paginator to handle buckets with >1,000 objects
             def _list_all_objects(s3_client):
                 """List all objects under prefix using pagination."""
@@ -186,7 +185,6 @@ def documents_discovery(
                 f"enabled_max={sampling_max_size}GB" if sampling_enabled else "disabled",
             )
 
-        with status.stage("write_descriptor"):
             os.makedirs(discovered_documents.path, exist_ok=True)
             descriptor_path = os.path.join(discovered_documents.path, DOCUMENTS_DESCRIPTOR_FILENAME)
             with open(descriptor_path, "w") as f:

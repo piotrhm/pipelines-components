@@ -19,8 +19,8 @@ class TestComponentStatusTracker:
     def test_record_and_save(self, tmp_path: Path) -> None:
         """save() writes stages and component_id to component_status.json."""
         tracker = ComponentStatusTracker(str(tmp_path), "automl_data_loader")
-        tracker.record("validate_inputs", "started", rows=5)
-        tracker.record("validate_inputs", "completed")
+        tracker.record("prepare_data", "started", rows=5)
+        tracker.record("prepare_data", "completed")
         tracker.save()
 
         data = json.loads((tmp_path / COMPONENT_STATUS_FILENAME).read_text(encoding="utf-8"))
@@ -56,7 +56,7 @@ class TestComponentStatusTracker:
         """Context manager marks active stage failed and persists status on exception."""
         with pytest.raises(RuntimeError, match="boom"):
             with ComponentStatusTracker(str(tmp_path), "automl_data_loader") as status:
-                status.record("read_and_sample", "started")
+                status.record("prepare_data", "started")
                 raise RuntimeError("boom")
 
         data = load_component_status(str(tmp_path))
@@ -66,26 +66,26 @@ class TestComponentStatusTracker:
     def test_context_manager_saves_on_success(self, tmp_path: Path) -> None:
         """Context manager persists status when the block completes normally."""
         with ComponentStatusTracker(str(tmp_path), "automl_data_loader") as status:
-            status.record("write_outputs", "completed")
+            status.record("split_and_export", "completed")
 
         assert (tmp_path / COMPONENT_STATUS_FILENAME).exists()
 
     def test_stage_context_manager_records_completed(self, tmp_path: Path) -> None:
         """stage() records started then completed when no exception is raised."""
         tracker = ComponentStatusTracker(str(tmp_path), "automl_data_loader")
-        with tracker.stage("split"):
+        with tracker.stage("split_and_export"):
             pass
         tracker.save()
 
         data = json.loads((tmp_path / COMPONENT_STATUS_FILENAME).read_text(encoding="utf-8"))
-        assert data["stages"][-1]["id"] == "split"
+        assert data["stages"][-1]["id"] == "split_and_export"
         assert data["stages"][-1]["status"] == "completed"
 
     def test_stage_context_manager_records_failed(self, tmp_path: Path) -> None:
         """stage() records failed when an exception escapes the block."""
         tracker = ComponentStatusTracker(str(tmp_path), "automl_data_loader")
         with pytest.raises(ValueError, match="bad split"):
-            with tracker.stage("split"):
+            with tracker.stage("split_and_export"):
                 raise ValueError("bad split")
         tracker.save()
 

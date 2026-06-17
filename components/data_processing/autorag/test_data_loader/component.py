@@ -78,7 +78,7 @@ def test_data_loader(
     _spec.loader.exec_module(_status_module)
     status = _status_module.bootstrap_status_tracker(embedded_artifact, component_status, "test_data_loader")
     with status:
-        with status.stage("validate_inputs"):
+        with status.stage("load_benchmark"):
             if not test_data_bucket_name:
                 raise TypeError("test_data_bucket_name must be a non-empty string")
 
@@ -93,17 +93,16 @@ def test_data_loader(
 
             s3_creds["AWS_DEFAULT_REGION"] = os.environ.get("AWS_DEFAULT_REGION")
 
-        def _make_s3_client(verify=True):
-            return boto3.client(
-                "s3",
-                endpoint_url=s3_creds["AWS_S3_ENDPOINT"],
-                region_name=s3_creds["AWS_DEFAULT_REGION"],
-                aws_access_key_id=s3_creds["AWS_ACCESS_KEY_ID"],
-                aws_secret_access_key=s3_creds["AWS_SECRET_ACCESS_KEY"],
-                verify=verify,
-            )
+            def _make_s3_client(verify=True):
+                return boto3.client(
+                    "s3",
+                    endpoint_url=s3_creds["AWS_S3_ENDPOINT"],
+                    region_name=s3_creds["AWS_DEFAULT_REGION"],
+                    aws_access_key_id=s3_creds["AWS_ACCESS_KEY_ID"],
+                    aws_secret_access_key=s3_creds["AWS_SECRET_ACCESS_KEY"],
+                    verify=verify,
+                )
 
-        with status.stage("download_and_sample"):
             s3_client = _make_s3_client()
 
             logger.info("Fetching test data from S3: bucket='%s', path='%s'.", test_data_bucket_name, test_data_path)
@@ -149,7 +148,6 @@ def test_data_loader(
                         f"Make sure that each test data records contains following keys: {benchmark_record_keys}."
                     )
 
-        with status.stage("write_output"):
             if 0 < benchmark_sample_size < len(benchmark_data) and isinstance(benchmark_data, list):
                 import random
 

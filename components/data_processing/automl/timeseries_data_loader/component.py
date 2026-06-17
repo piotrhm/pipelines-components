@@ -96,8 +96,7 @@ def timeseries_data_loader(
 
     status = ComponentStatusTracker(component_status.path, "timeseries_data_loader")
     with status:
-        status.record("validate_inputs", "started")
-        status.record("validate_inputs", "completed")
+        status.record("prepare_data", "started")
 
         def get_s3_client(verify=True):
             """Create and return an S3 client using credentials from environment variables."""
@@ -289,8 +288,8 @@ def timeseries_data_loader(
             return out.reset_index(drop=True)
 
         status.record(
-            "read_and_sample",
-            "started",
+            "prepare_data",
+            "running",
             source=f"s3://{bucket_name}/{file_key}",
         )
         df = load_timeseries_data_truncate(bucket_name, file_key, MAX_SIZE_BYTES, PANDAS_CHUNK_SIZE)
@@ -308,9 +307,6 @@ def timeseries_data_loader(
                 f"with columns {sorted(required_columns)}."
             )
 
-        status.record("read_and_sample", "completed", rows=len(df))
-        status.record("cleanse", "started")
-
         df = _clean_timeseries_dataframe(df, id_column, timestamp_column, logger)
 
         n_valid = len(df)
@@ -321,8 +317,8 @@ def timeseries_data_loader(
                 "Provide a larger dataset or fix invalid timestamps, null ids, and duplicate keys."
             )
 
-        status.record("cleanse", "completed", rows=n_valid)
-        status.record("split", "started")
+        status.record("prepare_data", "completed", rows=n_valid)
+        status.record("split_and_export", "started")
 
         # Create workspace datasets directory
         datasets_dir = Path(workspace_path) / "datasets"
@@ -391,7 +387,7 @@ def timeseries_data_loader(
             )
 
         status.record(
-            "split",
+            "split_and_export",
             "completed",
             test_size=test_size,
             selection_train_size=selection_train_size,
@@ -424,8 +420,6 @@ def timeseries_data_loader(
             "selection_train_size": selection_train_size,
         }
 
-        status.record("write_outputs", "started")
-        status.record("write_outputs", "completed")
         component_status.metadata["display_name"] = "Timeseries Data Loader Status"
 
         # Sample row for downstream use (JSON string to avoid NaN issues)

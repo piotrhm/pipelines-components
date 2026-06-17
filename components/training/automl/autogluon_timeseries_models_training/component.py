@@ -223,7 +223,7 @@ def autogluon_timeseries_models_training(
             "completed",
             top_n=top_n,
             selected_models=top_models,
-            steps=["model_training", "holdout_evaluation"],
+            steps=["feature_engineering", "model_training", "stacking", "model_evaluation"],
         )
         logger.info(
             "Timeseries selection done: top_%s=%s best_score_test=%s",
@@ -295,7 +295,7 @@ def autogluon_timeseries_models_training(
         models_metadata = []
         failed_models = []
 
-        status.record("refit_full", "started")
+        status.record("refit_and_evaluate", "started")
 
         def replace_placeholder_in_notebook(notebook, replacements):
             for cell in notebook.get("cells", []):
@@ -443,8 +443,12 @@ def autogluon_timeseries_models_training(
         if not model_names_full:
             raise RuntimeError("All models failed refit. No artifacts written.")
 
-        status.record("refit_full", "completed", model_count=len(model_names_full))
-        status.record("evaluate_models", "completed", eval_metric=eval_metric)
+        status.record(
+            "refit_and_evaluate",
+            "completed",
+            model_count=len(model_names_full),
+            eval_metric=eval_metric,
+        )
         component_status.metadata["display_name"] = "Timeseries Models Training Status"
 
         models_artifact.metadata["model_names"] = json.dumps(model_names_full)

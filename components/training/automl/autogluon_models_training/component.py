@@ -299,9 +299,8 @@ def autogluon_models_training(
         predictor_clone = predictor.clone(path=work_path, return_clone=True, dirs_exist_ok=True)
 
         # Refit all top models in a single call:  AutoGluon resolves stacking dependencies internally.
-        status.record("refit_full", "started")
+        status.record("refit_and_evaluate", "started")
         predictor_clone.refit_full(model=top_models, train_data_extra=extra_train_df)
-        status.record("refit_full", "completed", model_count=len(model_names_full))
 
         def replace_placeholder_in_notebook(notebook, replacements):
             for cell in notebook.get("cells", []):
@@ -657,7 +656,12 @@ def autogluon_models_training(
             "models": models_metadata,
         }
 
-        status.record("evaluate_models", "completed", eval_metric=str(predictor.eval_metric))
+        status.record(
+            "refit_and_evaluate",
+            "completed",
+            model_count=len(model_names_full),
+            eval_metric=str(predictor.eval_metric),
+        )
         component_status.metadata["display_name"] = "Models Training Status"
 
     return NamedTuple("outputs", eval_metric=str)(eval_metric=eval_metric)

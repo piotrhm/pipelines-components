@@ -1,623 +1,283 @@
-"""Tests for the rag_templates_optimization component."""
+"""Tests for the rag_templates_optimization thin wrapper component."""
 
-import os
-import sys
-import types
+import inspect
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
 
 from ..component import rag_templates_optimization
 
-
-class _SentinelAbort(Exception):
-    """Raised by mocks to abort the component after client creation."""
-
-
-def _make_httpx_module():
-    """Return a minimal fake httpx module with a trackable Client class."""
-    mod = types.ModuleType("httpx")
-
-    class ConnectError(Exception):
-        pass
-
-    class Client:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-    def get(url, **kwargs):
-        return types.SimpleNamespace(status_code=200)
-
-    mod.ConnectError = ConnectError
-    mod.Client = Client
-    mod.get = get
-    return mod
+MOCKED_ENV_VARIABLES = {
+    "OGX_CLIENT_BASE_URL": "https://ogx.example.com",
+    "OGX_CLIENT_API_KEY": "test-api-key",
+}
 
 
-def _make_minimal_httpx_module():
-    """Return a minimal httpx stub for validation-only test paths."""
-    mod = types.ModuleType("httpx")
+def _make_ai4rag_mocks():
+    """Build mock modules for ai4rag.components, ai4rag.components.optimization, ai4rag.utils.compat."""
+    mock_create_ogx_client = mock.MagicMock(name="create_ogx_client")
+    mock_run_rag_optimization = mock.MagicMock(name="run_rag_optimization")
+    mock_ensure_sqlite3 = mock.MagicMock(name="ensure_sqlite3")
 
-    class ConnectError(Exception):
-        pass
+    mock_components = mock.MagicMock()
+    mock_components.create_ogx_client = mock_create_ogx_client
 
-    class Client:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
+    mock_optimization = mock.MagicMock()
+    mock_optimization.run_rag_optimization = mock_run_rag_optimization
 
-    def get(url, **kwargs):
-        return types.SimpleNamespace(status_code=200)
+    mock_compat = mock.MagicMock()
+    mock_compat.ensure_sqlite3 = mock_ensure_sqlite3
 
-    mod.ConnectError = ConnectError
-    mod.Client = Client
-    mod.get = get
-    return mod
-
-
-def _make_ogx_client_module():
-    """Stub ogx_client with a real APIConnectionError (MagicMock breaks except clauses)."""
-    mod = types.ModuleType("ogx_client")
-
-    class APIConnectionError(Exception):
-        pass
-
-    mod.APIConnectionError = APIConnectionError
-    mod.OgxClient = mock.MagicMock()
-    return mod
-
-
-def _make_all_mocks():
-    """Build sys.modules patch dict for all heavy dependencies."""
-    mocks = {}
-    for name in [
-        "pysqlite3",
-        "ai4rag",
-        "ai4rag.core",
-        "ai4rag.core.experiment",
-        "ai4rag.core.experiment.experiment",
-        "ai4rag.core.experiment.results",
-        "ai4rag.core.hpo",
-        "ai4rag.core.hpo.gam_opt",
-        "ai4rag.rag",
-        "ai4rag.rag.embedding",
-        "ai4rag.rag.embedding.base_model",
-        "ai4rag.rag.embedding.ogx",
-        "ai4rag.rag.foundation_models",
-        "ai4rag.rag.foundation_models.base_model",
-        "ai4rag.rag.foundation_models.ogx",
-        "ai4rag.search_space",
-        "ai4rag.search_space.src",
-        "ai4rag.search_space.src.parameter",
-        "ai4rag.search_space.src.search_space",
-        "ai4rag.utils",
-        "ai4rag.utils.event_handler",
-        "ai4rag.utils.event_handler.event_handler",
-        "docling_core",
-        "docling_core.types",
-        "docling_core.types.doc",
-        "docling_core.types.doc.document",
-        "langchain_core",
-        "langchain_core.documents",
-        "pandas",
-    ]:
-        mocks[name] = mock.MagicMock()
-
-    httpx_mod = _make_httpx_module()
-    mocks["httpx"] = httpx_mod
-
-    # yaml needs safe_load to return a dict with .items()
-    mock_yaml = mock.MagicMock()
-    mock_yaml.safe_load.return_value = {}
-    mocks["yaml"] = mock_yaml
-
-    return mocks
-
-
-def _minimal_dependency_modules():
-    """Mock imported heavy third-party modules for validation-path tests."""
-    return {
-        "pandas": mock.MagicMock(),
-        "yaml": mock.MagicMock(),
+    modules = {
         "ai4rag": mock.MagicMock(),
-        "ai4rag.core": mock.MagicMock(),
-        "ai4rag.core.experiment": mock.MagicMock(),
-        "ai4rag.core.experiment.experiment": mock.MagicMock(AI4RAGExperiment=mock.MagicMock()),
-        "ai4rag.core.experiment.results": mock.MagicMock(ExperimentResults=mock.MagicMock()),
-        "ai4rag.core.hpo": mock.MagicMock(),
-        "ai4rag.core.hpo.gam_opt": mock.MagicMock(GAMOptSettings=mock.MagicMock()),
-        "ai4rag.rag": mock.MagicMock(),
-        "ai4rag.rag.embedding": mock.MagicMock(),
-        "ai4rag.rag.embedding.base_model": mock.MagicMock(BaseEmbeddingModel=mock.MagicMock()),
-        "ai4rag.rag.embedding.ogx": mock.MagicMock(OGXEmbeddingModel=mock.MagicMock()),
-        "ai4rag.rag.foundation_models": mock.MagicMock(),
-        "ai4rag.rag.foundation_models.base_model": mock.MagicMock(BaseFoundationModel=mock.MagicMock()),
-        "ai4rag.rag.foundation_models.ogx": mock.MagicMock(OGXFoundationModel=mock.MagicMock()),
-        "ai4rag.search_space": mock.MagicMock(),
-        "ai4rag.search_space.src": mock.MagicMock(),
-        "ai4rag.search_space.src.parameter": mock.MagicMock(Parameter=mock.MagicMock()),
-        "ai4rag.search_space.src.search_space": mock.MagicMock(AI4RAGSearchSpace=mock.MagicMock()),
+        "ai4rag.components": mock_components,
+        "ai4rag.components.optimization": mock_optimization,
         "ai4rag.utils": mock.MagicMock(),
-        "ai4rag.utils.event_handler": mock.MagicMock(),
-        "ai4rag.utils.event_handler.event_handler": mock.MagicMock(
-            BaseEventHandler=type("BaseEventHandler", (), {}),
-            LogLevel=mock.MagicMock(),
-        ),
-        "docling_core": mock.MagicMock(),
-        "docling_core.types": mock.MagicMock(),
-        "docling_core.types.doc": mock.MagicMock(),
-        "docling_core.types.doc.document": mock.MagicMock(),
-        "langchain_core": mock.MagicMock(),
-        "langchain_core.documents": mock.MagicMock(Document=mock.MagicMock()),
-        "ogx_client": mock.MagicMock(OgxClient=mock.MagicMock()),
-        "httpx": _make_minimal_httpx_module(),
+        "ai4rag.utils.compat": mock_compat,
     }
+    return modules, mock_create_ogx_client, mock_run_rag_optimization, mock_ensure_sqlite3
 
 
 class TestRagTemplatesOptimizationUnitTests:
-    """Unit tests for component logic."""
+    """Unit tests for the rag_templates_optimization thin wrapper."""
 
     def test_component_function_exists(self):
-        """Test that the component function is properly imported."""
+        """Component factory exists and exposes python_func."""
         assert callable(rag_templates_optimization)
         assert hasattr(rag_templates_optimization, "python_func")
 
-    def test_component_with_default_parameters(self):
-        """Test component has expected interface (required args)."""
-        import inspect
-
+    def test_component_has_expected_interface(self):
+        """Component has expected required parameters."""
         sig = inspect.signature(rag_templates_optimization.python_func)
         params = list(sig.parameters)
         assert "extracted_text" in params
         assert "test_data" in params
         assert "search_space_prep_report" in params
         assert "rag_patterns" in params
+        assert "embedded_artifact" in params
+        assert "test_data_key" in params
+        assert "vector_io_provider_id" in params
+        assert "optimization_settings" in params
+        assert "input_data_key" in params
 
-    def _setup_ogx_mocks(self, tmp_path, abort_at_experiment=True):
-        """Set up mocks and temp files for OGX vector store tests.
+    @mock.patch.dict("os.environ", MOCKED_ENV_VARIABLES, clear=True)
+    def test_delegates_to_ai4rag_run_rag_optimization(self, tmp_path):
+        """Wrapper calls ensure_sqlite3, create_ogx_client, and run_rag_optimization."""
+        modules, mock_create_ogx, mock_run_opt, mock_sqlite = _make_ai4rag_mocks()
+        mock_ogx_client = mock.MagicMock(name="ogx_client_instance")
+        mock_create_ogx.return_value = mock_ogx_client
 
-        Returns (mocks, extracted_text, test_data_path, search_space_report).
-        """
-        mocks = _make_all_mocks()
-        ogx_mod = _make_ogx_client_module()
-        mock_ogx = mock.MagicMock()
-        mock_ogx.models.list.return_value = []
-        ogx_mod.OgxClient.return_value = mock_ogx
-        mocks["ogx_client"] = ogx_mod
-        if abort_at_experiment:
-            mocks["ai4rag.core.experiment.experiment"].AI4RAGExperiment.side_effect = _SentinelAbort
+        patterns_list = [{"name": "pattern_a", "scores": {"faithfulness": {"mean": 0.9}}}]
+        mock_run_opt.return_value = SimpleNamespace(patterns=patterns_list)
 
-        search_space_report = tmp_path / "report.yml"
-        search_space_report.write_text("{}")
-        test_data_path = tmp_path / "test_data.json"
-        test_data_path.write_text("[]")
-        extracted_text = str(tmp_path / "extracted_text")
-
-        return mocks, extracted_text, str(test_data_path), str(search_space_report)
-
-    def _run_with_ogx(self, mocks, extracted_text, test_data, search_space_report, **kwargs):
-        """Run the component with OGX env vars and the given mocks."""
-        with (
-            mock.patch.dict(sys.modules, mocks),
-            mock.patch.dict(
-                os.environ,
-                {
-                    "OGX_CLIENT_BASE_URL": "https://ogx.example.com",
-                    "OGX_CLIENT_API_KEY": "test-api-key",
-                },
-            ),
-        ):
-            defaults = {
-                "extracted_text": extracted_text,
-                "test_data": test_data,
-                "search_space_prep_report": search_space_report,
-                "rag_patterns": mock.MagicMock(path="/tmp/rag_patterns", metadata={}, uri=""),
-                "embedded_artifact": mock.MagicMock(path="/tmp/embedded"),
-                "test_data_key": "small-dataset/benchmark.json",
-                "optimization_settings": {"metric": "faithfulness", "max_number_of_rag_patterns": 8},
-            }
-            defaults.update(kwargs)
-            rag_templates_optimization.python_func(**defaults)
-
-    def test_any_vector_store_id_is_accepted(self, tmp_path):
-        """Any non-empty vector_io_provider_id string is accepted (no allowlist)."""
-        mocks, extracted_text, test_data, report = self._setup_ogx_mocks(tmp_path)
-        with pytest.raises(_SentinelAbort):
-            self._run_with_ogx(mocks, extracted_text, test_data, report, vector_io_provider_id="my_custom_milvus")
-
-    def test_vector_store_type_set_to_ogx(self, tmp_path):
-        """AI4RAGExperiment receives vector_store_type 'ogx'."""
-        mocks, extracted_text, test_data, report = self._setup_ogx_mocks(tmp_path)
-        with pytest.raises(_SentinelAbort):
-            self._run_with_ogx(mocks, extracted_text, test_data, report, vector_io_provider_id="milvus")
-
-        ai4rag_exp = mocks["ai4rag.core.experiment.experiment"].AI4RAGExperiment
-        ai4rag_exp.assert_called_once()
-        assert ai4rag_exp.call_args.kwargs["vector_store_type"] == "ogx"
-
-    def test_missing_provider_id_raises_value_error(self, tmp_path):
-        """None provider_id raises ValueError."""
-        mocks, extracted_text, test_data, report = self._setup_ogx_mocks(tmp_path, abort_at_experiment=False)
-        with pytest.raises(ValueError, match="vector_io_provider_id must be a non-empty string"):
-            self._run_with_ogx(mocks, extracted_text, test_data, report, vector_io_provider_id=None)
-
-    def test_whitespace_provider_id_raises_value_error(self, tmp_path):
-        """Whitespace-only provider_id raises ValueError."""
-        mocks, extracted_text, test_data, report = self._setup_ogx_mocks(tmp_path, abort_at_experiment=False)
-        with pytest.raises(ValueError, match="vector_io_provider_id must be a non-empty string"):
-            self._run_with_ogx(mocks, extracted_text, test_data, report, vector_io_provider_id="   ")
-
-    def test_max_number_of_rag_patterns_non_numeric_string_raises_value_error(self):
-        """UI may pass string parameters; non-numeric strings are rejected with a clear error."""
-        with mock.patch.dict(sys.modules, _minimal_dependency_modules()):
-            with mock.patch.dict(
-                os.environ,
-                {
-                    "OGX_CLIENT_BASE_URL": "https://ogx.example.com",
-                    "OGX_CLIENT_API_KEY": "test-api-key",
-                },
-            ):
-                with pytest.raises(ValueError, match="max_number_of_rag_patterns must be a valid integer"):
-                    rag_templates_optimization.python_func(
-                        extracted_text="/tmp/extracted",
-                        test_data="/tmp/test_data.json",
-                        search_space_prep_report="/tmp/report.yml",
-                        rag_patterns=mock.MagicMock(path="/tmp/rag_patterns", metadata={}, uri=""),
-                        embedded_artifact=mock.MagicMock(path="/tmp/embedded"),
-                        test_data_key="small-dataset/benchmark.json",
-                        vector_io_provider_id="milvus",
-                        optimization_settings={
-                            "metric": "faithfulness",
-                            "max_number_of_rag_patterns": "not-a-number",
-                        },
-                    )
-
-    @mock.patch.dict(
-        os.environ,
-        {
-            "OGX_CLIENT_BASE_URL": "https://ogx.example.com",
-            "OGX_CLIENT_API_KEY": "test-api-key",
-        },
-    )
-    def test_max_number_of_rag_patterns_numeric_string_coerced_for_gam_opt(self, tmp_path):
-        """Pipeline UI often sends numbers as strings; they must coerce to int for GAMOptSettings."""
-        mocks = _make_all_mocks()
-        ogx_mod = _make_ogx_client_module()
-        mock_ogx = mock.MagicMock()
-        mock_ogx.models.list.return_value = []
-        ogx_mod.OgxClient.return_value = mock_ogx
-        mocks["ogx_client"] = ogx_mod
-        mocks["ai4rag.core.experiment.experiment"].AI4RAGExperiment.side_effect = _SentinelAbort
-
-        search_space_report = tmp_path / "report.yml"
-        search_space_report.write_text("{}")
-        extracted_text = str(tmp_path / "extracted_text")
-        test_data_path = tmp_path / "test_data.json"
-        test_data_path.write_text("[]")
-        test_data = str(test_data_path)
+        output_dir = tmp_path / "rag_patterns"
         rag_patterns = mock.MagicMock()
+        rag_patterns.path = str(output_dir)
+        rag_patterns.uri = "gs://bucket/rag_patterns"
+        rag_patterns.metadata = {}
+
         embedded_artifact = mock.MagicMock()
+        embedded_artifact.path = str(tmp_path / "shared")
 
-        with mock.patch.dict(sys.modules, mocks):
-            with pytest.raises(_SentinelAbort):
-                rag_templates_optimization.python_func(
-                    extracted_text=extracted_text,
-                    test_data=test_data,
-                    search_space_prep_report=str(search_space_report),
-                    rag_patterns=rag_patterns,
-                    embedded_artifact=embedded_artifact,
-                    test_data_key="small-dataset/benchmark.json",
-                    vector_io_provider_id="milvus",
-                    optimization_settings={"metric": "faithfulness", "max_number_of_rag_patterns": "8"},
-                )
-
-        mocks["ai4rag.core.hpo.gam_opt"].GAMOptSettings.assert_called_once_with(max_evals=8)
-
-    def test_missing_ogx_env_vars_raises_value_error(self):
-        """Missing OGX environment variables raises ValueError."""
-        with mock.patch.dict(sys.modules, _minimal_dependency_modules()):
-            with mock.patch.dict(os.environ, {}, clear=True):
-                with pytest.raises(ValueError, match="OGX_CLIENT_BASE_URL and OGX_CLIENT_API_KEY"):
-                    rag_templates_optimization.python_func(
-                        extracted_text="/tmp/extracted",
-                        test_data="/tmp/test_data.json",
-                        search_space_prep_report="/tmp/report.yml",
-                        rag_patterns=mock.MagicMock(path="/tmp/rag_patterns", metadata={}, uri=""),
-                        embedded_artifact=mock.MagicMock(path="/tmp/embedded"),
-                        test_data_key="small-dataset/benchmark.json",
-                        vector_io_provider_id="milvus",
-                        optimization_settings={"metric": "faithfulness", "max_number_of_rag_patterns": 8},
-                    )
-
-
-class TestSSLFallbackRagTemplatesOptimization:
-    """Tests for SSL retry logic in _create_ogx_client."""
-
-    def _make_paths(self, tmp_path):
-        """Create minimal real files needed by the component."""
-        search_space_report = tmp_path / "report.yml"
-        search_space_report.write_text("{}")
-        return (
-            str(tmp_path / "extracted_text"),  # non-existent dir → load_as_langchain_doc returns []
-            str(tmp_path / "test_data.json"),
-            str(search_space_report),
-        )
-
-    def _make_output_artifacts(self):
-        rag_patterns = mock.MagicMock()
-        embedded_artifact = mock.MagicMock()
-        return rag_patterns, embedded_artifact
-
-    @mock.patch.dict(
-        "os.environ",
-        {
-            "OGX_CLIENT_BASE_URL": "https://ogx.example.com",
-            "OGX_CLIENT_API_KEY": "test-api-key",
-        },
-    )
-    def test_ogx_client_ssl_retry_with_verify_false(self, tmp_path):
-        """Self-signed cert detected by httpx.get creates OgxClient with verify=False."""
-        mocks = _make_all_mocks()
-        httpx_mod = mocks["httpx"]
-
-        get_call_count = 0
-
-        def fake_get(url, **kwargs):
-            nonlocal get_call_count
-            get_call_count += 1
-            if get_call_count == 1:
-                raise httpx_mod.ConnectError("self-signed certificate in certificate chain")
-            return types.SimpleNamespace(status_code=200)
-
-        httpx_mod.get = fake_get
-
-        ogx_mod = _make_ogx_client_module()
-        ogx_kwargs_history = []
-
-        def fake_ogx_client(**kwargs):
-            ogx_kwargs_history.append(kwargs)
-            client = mock.MagicMock()
-            client.models.list.return_value = []
-            return client
-
-        ogx_mod.OgxClient.side_effect = fake_ogx_client
-        mocks["ogx_client"] = ogx_mod
-        mocks["ai4rag.search_space.src.search_space"].AI4RAGSearchSpace.side_effect = _SentinelAbort
-
-        extracted_text, test_data, search_space_report = self._make_paths(tmp_path)
-        rag_patterns, embedded_artifact = self._make_output_artifacts()
-
-        with mock.patch.dict(sys.modules, mocks):
-            with pytest.raises(_SentinelAbort):
-                rag_templates_optimization.python_func(
-                    extracted_text=extracted_text,
-                    test_data=test_data,
-                    search_space_prep_report=search_space_report,
-                    rag_patterns=rag_patterns,
-                    embedded_artifact=embedded_artifact,
-                    test_data_key="small-dataset/benchmark.json",
-                    vector_io_provider_id="milvus",
-                )
-
-        assert len(ogx_kwargs_history) == 1, "OgxClient should be instantiated once (with verify=False)"
-        assert isinstance(ogx_kwargs_history[0].get("http_client"), httpx_mod.Client)
-        assert ogx_kwargs_history[0]["http_client"].kwargs.get("verify") is False
-
-    @mock.patch.dict(
-        "os.environ",
-        {
-            "OGX_CLIENT_BASE_URL": "https://ogx.example.com",
-            "OGX_CLIENT_API_KEY": "test-api-key",
-        },
-    )
-    def test_ogx_client_ssl_retry_non_200_reraises(self, tmp_path):
-        """Self-signed cert detected creates OgxClient with verify=False (no probe step)."""
-        mocks = _make_all_mocks()
-        httpx_mod = mocks["httpx"]
-
-        httpx_mod.get = mock.MagicMock(
-            side_effect=httpx_mod.ConnectError("self-signed certificate in certificate chain"),
-        )
-
-        ogx_mod = _make_ogx_client_module()
-        ogx_kwargs_history = []
-
-        def fake_ogx_client(**kwargs):
-            ogx_kwargs_history.append(kwargs)
-            client = mock.MagicMock()
-            client.models.list.return_value = []
-            return client
-
-        ogx_mod.OgxClient.side_effect = fake_ogx_client
-        mocks["ogx_client"] = ogx_mod
-        mocks["ai4rag.search_space.src.search_space"].AI4RAGSearchSpace.side_effect = _SentinelAbort
-
-        extracted_text, test_data, search_space_report = self._make_paths(tmp_path)
-        rag_patterns, embedded_artifact = self._make_output_artifacts()
-
-        with mock.patch.dict(sys.modules, mocks):
-            with pytest.raises(_SentinelAbort):
-                rag_templates_optimization.python_func(
-                    extracted_text=extracted_text,
-                    test_data=test_data,
-                    search_space_prep_report=search_space_report,
-                    rag_patterns=rag_patterns,
-                    embedded_artifact=embedded_artifact,
-                    test_data_key="small-dataset/benchmark.json",
-                    vector_io_provider_id="milvus",
-                )
-
-        assert len(ogx_kwargs_history) == 1
-        assert isinstance(ogx_kwargs_history[0].get("http_client"), httpx_mod.Client)
-        assert ogx_kwargs_history[0]["http_client"].kwargs.get("verify") is False
-
-    @mock.patch.dict(
-        "os.environ",
-        {
-            "OGX_CLIENT_BASE_URL": "https://ogx.example.com",
-            "OGX_CLIENT_API_KEY": "test-api-key",
-        },
-    )
-    def test_ogx_client_non_ssl_error_is_reraised(self, tmp_path):
-        """Non-SSL ConnectError from httpx.get() propagates without retry."""
-        mocks = _make_all_mocks()
-        httpx_mod = mocks["httpx"]
-
-        httpx_mod.get = mock.MagicMock(side_effect=httpx_mod.ConnectError("Connection refused"))
-
-        ogx_mod = _make_ogx_client_module()
-        mocks["ogx_client"] = ogx_mod
-
-        extracted_text, test_data, search_space_report = self._make_paths(tmp_path)
-        rag_patterns, embedded_artifact = self._make_output_artifacts()
-
-        with mock.patch.dict(sys.modules, mocks):
-            with pytest.raises(httpx_mod.ConnectError, match="Connection refused"):
-                rag_templates_optimization.python_func(
-                    extracted_text=extracted_text,
-                    test_data=test_data,
-                    search_space_prep_report=search_space_report,
-                    rag_patterns=rag_patterns,
-                    embedded_artifact=embedded_artifact,
-                    test_data_key="small-dataset/benchmark.json",
-                    vector_io_provider_id="milvus",
-                )
-
-    @mock.patch.dict(
-        "os.environ",
-        {
-            "OGX_CLIENT_BASE_URL": "https://ogx.example.com",
-            "OGX_CLIENT_API_KEY": "test-api-key",
-        },
-    )
-    def test_ogx_client_happy_path_no_ssl_issue(self, tmp_path):
-        """When httpx.get() succeeds, OgxClient is created without http_client override."""
-        mocks = _make_all_mocks()
-
-        ogx_mod = _make_ogx_client_module()
-        ogx_kwargs_history = []
-
-        def fake_ogx_client(**kwargs):
-            ogx_kwargs_history.append(kwargs)
-            client = mock.MagicMock()
-            client.models.list.return_value = []
-            return client
-
-        ogx_mod.OgxClient.side_effect = fake_ogx_client
-        mocks["ogx_client"] = ogx_mod
-        mocks["ai4rag.search_space.src.search_space"].AI4RAGSearchSpace.side_effect = _SentinelAbort
-
-        extracted_text, test_data, search_space_report = self._make_paths(tmp_path)
-        rag_patterns, embedded_artifact = self._make_output_artifacts()
-
-        with mock.patch.dict(sys.modules, mocks):
-            with pytest.raises(_SentinelAbort):
-                rag_templates_optimization.python_func(
-                    extracted_text=extracted_text,
-                    test_data=test_data,
-                    search_space_prep_report=search_space_report,
-                    rag_patterns=rag_patterns,
-                    embedded_artifact=embedded_artifact,
-                    test_data_key="small-dataset/benchmark.json",
-                    vector_io_provider_id="milvus",
-                )
-        assert len(ogx_kwargs_history) == 1, "OgxClient should be instantiated once"
-        assert ogx_kwargs_history[0].get("http_client") is None, "No http_client override needed"
-
-
-class TestMultilingualPromptOverrides:
-    """Tests for detected_language prompt override and _build_system_message dedup."""
-
-    def _setup_with_language(self, tmp_path, detected_language=None):
-        """Set up mocks with detected_language in search space YAML."""
-        mocks = _make_all_mocks()
-        ogx_mod = _make_ogx_client_module()
-        mock_ogx = mock.MagicMock()
-        mock_ogx.models.list.return_value = []
-        ogx_mod.OgxClient.return_value = mock_ogx
-        mocks["ogx_client"] = ogx_mod
-        mocks["ai4rag.core.experiment.experiment"].AI4RAGExperiment.side_effect = _SentinelAbort
-
-        search_space_data = {}
-        if detected_language:
-            search_space_data["detected_language"] = detected_language
-
-        mock_yaml = mock.MagicMock()
-        mock_yaml.safe_load.return_value = search_space_data
-        mocks["yaml"] = mock_yaml
-
-        report = tmp_path / "report.yml"
-        report.write_text("{}")
-        test_data = tmp_path / "test_data.json"
-        test_data.write_text("[]")
-
-        return mocks, str(tmp_path / "extracted"), str(test_data), str(report)
-
-    def _run(self, mocks, extracted_text, test_data, report, **kwargs):
-        with (
-            mock.patch.dict(sys.modules, mocks),
-            mock.patch.dict(
-                os.environ,
-                {
-                    "OGX_CLIENT_BASE_URL": "https://ogx.example.com",
-                    "OGX_CLIENT_API_KEY": "test-api-key",
-                },
-            ),
-        ):
+        with mock.patch.dict("sys.modules", modules):
             rag_templates_optimization.python_func(
-                extracted_text=extracted_text,
-                test_data=test_data,
-                search_space_prep_report=report,
-                rag_patterns=mock.MagicMock(path="/tmp/rag_patterns", metadata={}, uri=""),
-                embedded_artifact=mock.MagicMock(path="/tmp/embedded"),
-                test_data_key="small-dataset/benchmark.json",
-                vector_io_provider_id="milvus",
-                optimization_settings={"metric": "faithfulness", "max_number_of_rag_patterns": 8},
-                **kwargs,
+                extracted_text=str(tmp_path / "extracted"),
+                test_data=str(tmp_path / "test_data.json"),
+                search_space_prep_report=str(tmp_path / "report.yml"),
+                rag_patterns=rag_patterns,
+                embedded_artifact=embedded_artifact,
+                test_data_key="data/test.json",
+                vector_io_provider_id="milvus-provider",
+                optimization_settings={"max_number_of_rag_patterns": 8},
+                input_data_key="data/docs/",
             )
 
-    def test_detected_language_sets_prompts_on_foundation_models(self, tmp_path):
-        """When detected_language is present, foundation models get explicit language instruction."""
-        mocks, ext, td, report = self._setup_with_language(tmp_path, detected_language={"code": "de", "name": "German"})
-        mock_fm = mock.MagicMock()
-        mock_search_space = mock.MagicMock()
-        mock_search_space.__getitem__ = mock.MagicMock(return_value=mock.MagicMock(values=[mock_fm]))
-        mocks["ai4rag.search_space.src.search_space"].AI4RAGSearchSpace.return_value = mock_search_space
-
-        with pytest.raises(_SentinelAbort):
-            self._run(mocks, ext, td, report)
-
-        assert "You MUST respond in German." in mock_fm.system_message_text
-        assert "You MUST respond in German." in mock_fm.user_message_text
-
-    def test_no_detected_language_preserves_defaults(self, tmp_path):
-        """Without detected_language, foundation model prompts are untouched."""
-        mocks, ext, td, report = self._setup_with_language(tmp_path)
-        mock_fm = mock.MagicMock()
-        original_sys = mock_fm.system_message_text
-        mock_search_space = mock.MagicMock()
-        mock_search_space.__getitem__ = mock.MagicMock(return_value=mock.MagicMock(values=[mock_fm]))
-        mocks["ai4rag.search_space.src.search_space"].AI4RAGSearchSpace.return_value = mock_search_space
-
-        with pytest.raises(_SentinelAbort):
-            self._run(mocks, ext, td, report)
-
-        assert mock_fm.system_message_text == original_sys
-
-    def test_detected_language_popped_before_search_space_construction(self, tmp_path):
-        """detected_language must not leak into AI4RAGSearchSpace as a parameter."""
-        mocks, ext, td, report = self._setup_with_language(
-            tmp_path, detected_language={"code": "ja", "name": "Japanese"}
+        mock_sqlite.assert_called_once()
+        mock_create_ogx.assert_called_once_with(
+            base_url="https://ogx.example.com",
+            api_key="test-api-key",
         )
+        mock_run_opt.assert_called_once()
+        call_kwargs = mock_run_opt.call_args.kwargs
+        assert call_kwargs["extracted_text_path"] == str(tmp_path / "extracted")
+        assert call_kwargs["test_data_path"] == str(tmp_path / "test_data.json")
+        assert call_kwargs["search_space_report_path"] == str(tmp_path / "report.yml")
+        assert call_kwargs["ogx_client"] is mock_ogx_client
+        assert call_kwargs["vector_io_provider_id"] == "milvus-provider"
+        assert call_kwargs["test_data_key"] == "data/test.json"
+        assert call_kwargs["input_data_key"] == "data/docs/"
+        assert call_kwargs["optimization_settings"] == {"max_number_of_rag_patterns": 8}
+        assert call_kwargs["templates_dir"] == str(tmp_path / "shared")
 
-        with pytest.raises(_SentinelAbort):
-            self._run(mocks, ext, td, report)
+    @mock.patch.dict("os.environ", MOCKED_ENV_VARIABLES, clear=True)
+    def test_sets_artifact_metadata(self, tmp_path):
+        """Wrapper sets rag_patterns.metadata correctly from result.patterns."""
+        modules, mock_create_ogx, mock_run_opt, _ = _make_ai4rag_mocks()
+        mock_create_ogx.return_value = mock.MagicMock()
 
-        param_calls = mocks["ai4rag.search_space.src.parameter"].Parameter.call_args_list
-        param_names = [c.args[0] if c.args else c.kwargs.get("name", "") for c in param_calls]
-        assert "detected_language" not in param_names
+        patterns_list = [
+            {"name": "pattern_a", "final_score": 0.95},
+            {"name": "pattern_b", "final_score": 0.88},
+        ]
+        mock_run_opt.return_value = SimpleNamespace(patterns=patterns_list)
+
+        rag_patterns = mock.MagicMock()
+        rag_patterns.path = str(tmp_path / "rag_patterns")
+        rag_patterns.uri = "gs://bucket/rag_patterns"
+        rag_patterns.metadata = {}
+
+        embedded_artifact = mock.MagicMock()
+        embedded_artifact.path = str(tmp_path / "shared")
+
+        with mock.patch.dict("sys.modules", modules):
+            rag_templates_optimization.python_func(
+                extracted_text=str(tmp_path / "ext"),
+                test_data=str(tmp_path / "td.json"),
+                search_space_prep_report=str(tmp_path / "r.yml"),
+                rag_patterns=rag_patterns,
+                embedded_artifact=embedded_artifact,
+                test_data_key="key.json",
+                vector_io_provider_id="provider",
+            )
+
+        assert rag_patterns.metadata["name"] == "rag_patterns_artifact"
+        assert rag_patterns.metadata["uri"] == "gs://bucket/rag_patterns"
+        assert rag_patterns.metadata["metadata"]["patterns"] == patterns_list
+
+    @mock.patch.dict("os.environ", MOCKED_ENV_VARIABLES, clear=True)
+    def test_creates_output_directory(self, tmp_path):
+        """Output directory is created before calling run_rag_optimization."""
+        modules, mock_create_ogx, mock_run_opt, _ = _make_ai4rag_mocks()
+        mock_create_ogx.return_value = mock.MagicMock()
+        mock_run_opt.return_value = SimpleNamespace(patterns=[])
+
+        output_dir = tmp_path / "nested" / "rag_patterns"
+        rag_patterns = mock.MagicMock()
+        rag_patterns.path = str(output_dir)
+        rag_patterns.uri = "uri"
+        rag_patterns.metadata = {}
+
+        embedded_artifact = mock.MagicMock()
+        embedded_artifact.path = str(tmp_path / "shared")
+
+        with mock.patch.dict("sys.modules", modules):
+            rag_templates_optimization.python_func(
+                extracted_text=str(tmp_path / "ext"),
+                test_data=str(tmp_path / "td.json"),
+                search_space_prep_report=str(tmp_path / "r.yml"),
+                rag_patterns=rag_patterns,
+                embedded_artifact=embedded_artifact,
+                test_data_key="key.json",
+                vector_io_provider_id="provider",
+            )
+
+        assert output_dir.exists()
+
+    @mock.patch.dict("os.environ", MOCKED_ENV_VARIABLES, clear=True)
+    def test_none_keys_default_to_empty_string(self, tmp_path):
+        """None test_data_key and input_data_key default to empty strings."""
+        modules, mock_create_ogx, mock_run_opt, _ = _make_ai4rag_mocks()
+        mock_create_ogx.return_value = mock.MagicMock()
+        mock_run_opt.return_value = SimpleNamespace(patterns=[])
+
+        rag_patterns = mock.MagicMock()
+        rag_patterns.path = str(tmp_path / "out")
+        rag_patterns.uri = "uri"
+        rag_patterns.metadata = {}
+
+        embedded_artifact = mock.MagicMock()
+        embedded_artifact.path = str(tmp_path / "shared")
+
+        with mock.patch.dict("sys.modules", modules):
+            rag_templates_optimization.python_func(
+                extracted_text=str(tmp_path / "ext"),
+                test_data=str(tmp_path / "td.json"),
+                search_space_prep_report=str(tmp_path / "r.yml"),
+                rag_patterns=rag_patterns,
+                embedded_artifact=embedded_artifact,
+                test_data_key=None,
+                vector_io_provider_id="provider",
+                input_data_key=None,
+            )
+
+        call_kwargs = mock_run_opt.call_args.kwargs
+        assert call_kwargs["test_data_key"] == ""
+        assert call_kwargs["input_data_key"] == ""
+
+    @mock.patch.dict("os.environ", MOCKED_ENV_VARIABLES, clear=True)
+    def test_no_embedded_artifact_passes_none_templates(self, tmp_path):
+        """When embedded_artifact has no path attr, templates_dir=None is passed."""
+        modules, mock_create_ogx, mock_run_opt, _ = _make_ai4rag_mocks()
+        mock_create_ogx.return_value = mock.MagicMock()
+        mock_run_opt.return_value = SimpleNamespace(patterns=[])
+
+        rag_patterns = mock.MagicMock()
+        rag_patterns.path = str(tmp_path / "out")
+        rag_patterns.uri = "uri"
+        rag_patterns.metadata = {}
+
+        embedded_artifact = mock.MagicMock(spec=[])
+
+        with mock.patch.dict("sys.modules", modules):
+            rag_templates_optimization.python_func(
+                extracted_text=str(tmp_path / "ext"),
+                test_data=str(tmp_path / "td.json"),
+                search_space_prep_report=str(tmp_path / "r.yml"),
+                rag_patterns=rag_patterns,
+                embedded_artifact=embedded_artifact,
+                test_data_key="key.json",
+                vector_io_provider_id="provider",
+            )
+
+        assert mock_run_opt.call_args.kwargs["templates_dir"] is None
+
+    def test_missing_ogx_env_raises_key_error(self, tmp_path):
+        """Missing OGX env vars raise KeyError."""
+        modules, _, _, _ = _make_ai4rag_mocks()
+
+        rag_patterns = mock.MagicMock()
+        rag_patterns.path = str(tmp_path / "out")
+        rag_patterns.metadata = {}
+
+        embedded_artifact = mock.MagicMock()
+        embedded_artifact.path = str(tmp_path / "shared")
+
+        with mock.patch.dict("os.environ", {}, clear=True):
+            with mock.patch.dict("sys.modules", modules):
+                with pytest.raises(KeyError):
+                    rag_templates_optimization.python_func(
+                        extracted_text=str(tmp_path / "ext"),
+                        test_data=str(tmp_path / "td.json"),
+                        search_space_prep_report=str(tmp_path / "r.yml"),
+                        rag_patterns=rag_patterns,
+                        embedded_artifact=embedded_artifact,
+                        test_data_key="key.json",
+                        vector_io_provider_id="provider",
+                    )
+
+    @mock.patch.dict("os.environ", MOCKED_ENV_VARIABLES, clear=True)
+    def test_propagates_ai4rag_exception(self, tmp_path):
+        """Exceptions from ai4rag are propagated to the caller."""
+        modules, mock_create_ogx, mock_run_opt, _ = _make_ai4rag_mocks()
+        mock_create_ogx.return_value = mock.MagicMock()
+        mock_run_opt.side_effect = ValueError("test_data_path must point to a JSON file")
+
+        rag_patterns = mock.MagicMock()
+        rag_patterns.path = str(tmp_path / "out")
+        rag_patterns.metadata = {}
+
+        embedded_artifact = mock.MagicMock()
+        embedded_artifact.path = str(tmp_path / "shared")
+
+        with mock.patch.dict("sys.modules", modules):
+            with pytest.raises(ValueError, match="test_data_path must point to a JSON file"):
+                rag_templates_optimization.python_func(
+                    extracted_text=str(tmp_path / "ext"),
+                    test_data=str(tmp_path / "td.json"),
+                    search_space_prep_report=str(tmp_path / "r.yml"),
+                    rag_patterns=rag_patterns,
+                    embedded_artifact=embedded_artifact,
+                    test_data_key="key.json",
+                    vector_io_provider_id="provider",
+                )

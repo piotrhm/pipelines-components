@@ -192,12 +192,6 @@ def documents_rag_optimization_pipeline(
         },
     )
 
-    leaderboard_evaluation_task = leaderboard_evaluation(rag_patterns=hpo_task.outputs["rag_patterns"])
-    leaderboard_evaluation_task.set_caching_options(False)
-    leaderboard_evaluation_task.set_cpu_request("1").set_memory_request("4Gi").set_cpu_limit(MAX_CPUS).set_memory_limit(
-        MAX_MEMORY
-    )
-
 
 if __name__ == "__main__":
     from kfp.compiler import Compiler

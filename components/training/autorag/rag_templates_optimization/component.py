@@ -13,16 +13,17 @@ _AUTORAG_SHARED = Path(__file__).parents[1] / "shared"
     install_kfp_package=False,
 )
 def rag_templates_optimization(
-    extracted_text: dsl.InputPath(dsl.Artifact),
-    test_data: dsl.InputPath(dsl.Artifact),
-    search_space_prep_report: dsl.InputPath(dsl.Artifact),
-    rag_patterns: dsl.Output[dsl.Artifact],
-    test_data_key: Optional[str],
-    vector_io_provider_id: str,
-    embedded_artifact: dsl.EmbeddedInput[dsl.Dataset] = None,
-    optimization_settings: Optional[dict] = None,
-    input_data_key: Optional[str] = "",
-    component_status: dsl.Output[dsl.Artifact] = None,
+        extracted_text: dsl.InputPath(dsl.Artifact),
+        test_data: dsl.InputPath(dsl.Artifact),
+        search_space_prep_report: dsl.InputPath(dsl.Artifact),
+        rag_patterns: dsl.Output[dsl.Artifact],
+        test_data_key: Optional[str],
+        vector_io_provider_id: str,
+        html_artifact: dsl.Output[dsl.HTML],
+        embedded_artifact: dsl.EmbeddedInput[dsl.Dataset] = None,
+        optimization_settings: Optional[dict] = None,
+        input_data_key: Optional[str] = "",
+        component_status: dsl.Output[dsl.Artifact] = None,
 ):
     """RAG Templates Optimization component.
 
@@ -36,6 +37,8 @@ def rag_templates_optimization(
         rag_patterns: Output artifact for generated RAG patterns.
         test_data_key: Path to benchmark JSON in object storage.
         vector_io_provider_id: Vector I/O provider identifier in OGX.
+        html_artifact: Output HTML artifact; the leaderboard table is written to
+            html_artifact.path (single file).
         component_status: Output artifact containing stage-level progress tracking.
         embedded_artifact: Embedded ``autorag.shared`` helpers injected by KFP at runtime.
         optimization_settings: Additional experiment settings.
@@ -49,9 +52,12 @@ def rag_templates_optimization(
     import os
     from pathlib import Path
 
+    from ai4rag.utils.compat import ensure_sqlite3
+    ensure_sqlite3()
+
+    from ai4rag.components.assets_generator.leaderboard import build_leaderboard_html, DEFAULT_METRIC
     from ai4rag.components.optimization.rag_templates_optimization import run_rag_optimization
     from ai4rag.components.utils import create_ogx_client
-    from ai4rag.utils.compat import ensure_sqlite3
 
     ensure_sqlite3()
     logging.basicConfig(level=logging.INFO)
@@ -111,6 +117,17 @@ def rag_templates_optimization(
             rag_patterns.metadata["name"] = "rag_patterns_artifact"
             rag_patterns.metadata["uri"] = rag_patterns.uri
             rag_patterns.metadata["metadata"] = {"patterns": result.patterns}
+
+        with status.stage("build_leaderboard"):
+            html_content = build_leaderboard_html(
+                patterns_dir=rag_patterns,
+                optimization_metric=(
+                    optimization_settings.get("metric") if isinstance(optimization_settings, dict) else DEFAULT_METRIC)
+            )
+
+            Path(html_artifact.path).parent.mkdir(parents=True, exist_ok=True)
+            with open(html_artifact.path, "w", encoding="utf-8") as f:
+                f.write(html_content)
 
 
 if __name__ == "__main__":

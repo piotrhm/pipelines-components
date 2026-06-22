@@ -25,6 +25,7 @@ def autogluon_timeseries_models_training(
     split_config: Optional[dict] = None,
     prediction_length: int = 1,
     known_covariates_names: Optional[List[str]] = None,
+    preset: str = "speed",
     eval_metric: str = "MASE",
 ) -> NamedTuple(
     "outputs",
@@ -61,6 +62,8 @@ def autogluon_timeseries_models_training(
         prediction_length: Forecast horizon (number of timesteps).
         known_covariates_names: Optional list of known covariate column names.
         component_status: Output artifact containing stage-level progress tracking for this component.
+        preset: Training quality tier. ``"speed"`` (default) or ``"balanced"``
+            (may run more than 2x longer).
         eval_metric: Metric for model ranking (e.g. ``"MASE"``, ``"WQL"``). Defaults to ``"MASE"``.
 
     Returns:
@@ -80,17 +83,26 @@ def autogluon_timeseries_models_training(
     logger = logging.getLogger(__name__)
 
     from kfp_components.components.training.automl.shared.back_testing import build_back_testing_json
+    from kfp_components.components.training.automl.shared.back_testing_charts import (
+        notebook_backtest_charts_source,
+    )
     from kfp_components.components.training.automl.shared.timeseries_notebook_utils import (
         build_predict_sample_artifact,
+        notebook_timeseries_sample_helpers_source,
     )
 
     status = ComponentStatusTracker(component_status.path, "autogluon_timeseries_models_training")
     with status:
+        status.set_metadata(display_name="Timeseries Models Training Status")
+        component_status.metadata["display_name"] = "Timeseries Models Training Status"
         TOP_N_MAX = 7
-        DEFAULT_PRESETS = "fast_training"
-        DEFAULT_TIME_LIMIT = 600  # 10 minutes
+        VALID_PRESETS = {"speed", "balanced"}
+        PRESET_AG_NAMES = {"speed": "fast_training", "balanced": "medium_quality"}
+        PRESET_TIME_LIMITS = {"speed": 10 * 60, "balanced": 60 * 60}
 
         # Input validation
+        if preset not in VALID_PRESETS:
+            raise ValueError(f"preset must be one of {VALID_PRESETS}; got {preset!r}.")
         for param, value in (
             ("target", target),
             ("id_column", id_column),
@@ -137,6 +149,7 @@ def autogluon_timeseries_models_training(
             raise TypeError("split_config must be a dictionary or None.")
         sampling_config = sampling_config or {}
         split_config = split_config or {}
+        time_limit = PRESET_TIME_LIMITS[preset]
 
         status.record("load_data", "started")
         train_df = pd.read_csv(train_data_path)
@@ -182,16 +195,16 @@ def autogluon_timeseries_models_training(
 
         logger.info(
             "Timeseries selection: training (preset=%s, time_limit=%ss, prediction_length=%s)...",
-            DEFAULT_PRESETS,
-            DEFAULT_TIME_LIMIT,
+            preset,
+            time_limit,
             prediction_length,
         )
         status.record("model_selection", "started")
         try:
             predictor.fit(
                 train_data=train_ts,
-                presets=DEFAULT_PRESETS,
-                time_limit=DEFAULT_TIME_LIMIT,
+                presets=PRESET_AG_NAMES[preset],
+                time_limit=time_limit,
                 # exclude deep learning models pretrained on large time series datasets
                 excluded_model_types=["Chronos", "Toto", "Chronos2"],
             )
@@ -216,7 +229,7 @@ def autogluon_timeseries_models_training(
             "completed",
             top_n=top_n,
             selected_models=top_models,
-            steps=["model_training", "holdout_evaluation"],
+            steps=["feature_engineering", "model_training", "stacking", "evaluation"],
         )
         logger.info(
             "Timeseries selection done: top_%s=%s best_score_test=%s",
@@ -232,8 +245,8 @@ def autogluon_timeseries_models_training(
             "target": target,
             "id_column": id_column,
             "timestamp_column": timestamp_column,
-            "presets": DEFAULT_PRESETS,
-            "time_limit": DEFAULT_TIME_LIMIT,
+            "presets": preset,
+            "time_limit": time_limit,
             "known_covariates_names": known_covariates_names or [],
             "num_models_trained": len(leaderboard),
         }
@@ -244,7 +257,6 @@ def autogluon_timeseries_models_training(
                 "Skipping combined full-refit stage; missing models_artifact or extra_train_data_path. "
                 "Returning selection-only outputs for backward compatibility."
             )
-            component_status.metadata["display_name"] = "Timeseries Models Training Status"
             outputs = NamedTuple(
                 "outputs",
                 top_models=List[str],
@@ -288,7 +300,7 @@ def autogluon_timeseries_models_training(
         models_metadata = []
         failed_models = []
 
-        status.record("refit_full", "started")
+        status.record("refit_and_evaluate", "started")
 
         def replace_placeholder_in_notebook(notebook, replacements):
             for cell in notebook.get("cells", []):
@@ -329,7 +341,7 @@ def autogluon_timeseries_models_training(
                 predictor_refit.fit(
                     train_data=full_train_ts_df,
                     **additional_fit_params,
-                    time_limit=DEFAULT_TIME_LIMIT,
+                    time_limit=time_limit,
                     excluded_model_types=["Chronos", "Chronos2", "Toto"],
                 )
                 metrics = predictor_refit.evaluate(test_ts, metrics=list(AVAILABLE_METRICS.keys()))
@@ -392,6 +404,8 @@ def autogluon_timeseries_models_training(
                     "<REPLACE_PIPELINE_NAME>": pipeline_name_trimmed,
                     "<REPLACE_MODEL_NAME>": model_name_full,
                     "<REPLACE_PREDICT_SAMPLE>": str(predict_sample),
+                    "<REPLACE_BACKTEST_PLOT_HELPERS>": notebook_backtest_charts_source(),
+                    "<REPLACE_TIMESERIES_SAMPLE_HELPERS>": notebook_timeseries_sample_helpers_source(),
                 }
                 notebook = replace_placeholder_in_notebook(notebook, replacements)
 
@@ -436,9 +450,12 @@ def autogluon_timeseries_models_training(
         if not model_names_full:
             raise RuntimeError("All models failed refit. No artifacts written.")
 
-        status.record("refit_full", "completed", model_count=len(model_names_full))
-        status.record("evaluate_models", "completed", eval_metric=eval_metric)
-        component_status.metadata["display_name"] = "Timeseries Models Training Status"
+        status.record(
+            "refit_and_evaluate",
+            "completed",
+            model_count=len(model_names_full),
+            eval_metric=eval_metric,
+        )
 
         models_artifact.metadata["model_names"] = json.dumps(model_names_full)
         models_artifact.metadata["context"] = {

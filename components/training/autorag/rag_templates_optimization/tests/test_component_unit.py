@@ -20,19 +20,21 @@ def _make_ai4rag_mocks():
     mock_run_rag_optimization = mock.MagicMock(name="run_rag_optimization")
     mock_ensure_sqlite3 = mock.MagicMock(name="ensure_sqlite3")
 
-    mock_components = mock.MagicMock()
-    mock_components.create_ogx_client = mock_create_ogx_client
+    mock_utils = mock.MagicMock()
+    mock_utils.create_ogx_client = mock_create_ogx_client
 
-    mock_optimization = mock.MagicMock()
-    mock_optimization.run_rag_optimization = mock_run_rag_optimization
+    mock_optimization_module = mock.MagicMock()
+    mock_optimization_module.run_rag_optimization = mock_run_rag_optimization
 
     mock_compat = mock.MagicMock()
     mock_compat.ensure_sqlite3 = mock_ensure_sqlite3
 
     modules = {
         "ai4rag": mock.MagicMock(),
-        "ai4rag.components": mock_components,
-        "ai4rag.components.optimization": mock_optimization,
+        "ai4rag.components": mock.MagicMock(),
+        "ai4rag.components.utils": mock_utils,
+        "ai4rag.components.optimization": mock.MagicMock(),
+        "ai4rag.components.optimization.rag_templates_optimization": mock_optimization_module,
         "ai4rag.utils": mock.MagicMock(),
         "ai4rag.utils.compat": mock_compat,
     }
@@ -77,16 +79,12 @@ class TestRagTemplatesOptimizationUnitTests:
         rag_patterns.uri = "gs://bucket/rag_patterns"
         rag_patterns.metadata = {}
 
-        embedded_artifact = mock.MagicMock()
-        embedded_artifact.path = str(tmp_path / "shared")
-
         with mock.patch.dict("sys.modules", modules):
             rag_templates_optimization.python_func(
                 extracted_text=str(tmp_path / "extracted"),
                 test_data=str(tmp_path / "test_data.json"),
                 search_space_prep_report=str(tmp_path / "report.yml"),
                 rag_patterns=rag_patterns,
-                embedded_artifact=embedded_artifact,
                 test_data_key="data/test.json",
                 vector_io_provider_id="milvus-provider",
                 optimization_settings={"max_number_of_rag_patterns": 8},
@@ -108,7 +106,6 @@ class TestRagTemplatesOptimizationUnitTests:
         assert call_kwargs["test_data_key"] == "data/test.json"
         assert call_kwargs["input_data_key"] == "data/docs/"
         assert call_kwargs["optimization_settings"] == {"max_number_of_rag_patterns": 8}
-        assert call_kwargs["templates_dir"] == str(tmp_path / "shared")
 
     @mock.patch.dict("os.environ", MOCKED_ENV_VARIABLES, clear=True)
     def test_sets_artifact_metadata(self, tmp_path):
@@ -127,16 +124,12 @@ class TestRagTemplatesOptimizationUnitTests:
         rag_patterns.uri = "gs://bucket/rag_patterns"
         rag_patterns.metadata = {}
 
-        embedded_artifact = mock.MagicMock()
-        embedded_artifact.path = str(tmp_path / "shared")
-
         with mock.patch.dict("sys.modules", modules):
             rag_templates_optimization.python_func(
                 extracted_text=str(tmp_path / "ext"),
                 test_data=str(tmp_path / "td.json"),
                 search_space_prep_report=str(tmp_path / "r.yml"),
                 rag_patterns=rag_patterns,
-                embedded_artifact=embedded_artifact,
                 test_data_key="key.json",
                 vector_io_provider_id="provider",
             )
@@ -158,16 +151,12 @@ class TestRagTemplatesOptimizationUnitTests:
         rag_patterns.uri = "uri"
         rag_patterns.metadata = {}
 
-        embedded_artifact = mock.MagicMock()
-        embedded_artifact.path = str(tmp_path / "shared")
-
         with mock.patch.dict("sys.modules", modules):
             rag_templates_optimization.python_func(
                 extracted_text=str(tmp_path / "ext"),
                 test_data=str(tmp_path / "td.json"),
                 search_space_prep_report=str(tmp_path / "r.yml"),
                 rag_patterns=rag_patterns,
-                embedded_artifact=embedded_artifact,
                 test_data_key="key.json",
                 vector_io_provider_id="provider",
             )
@@ -186,16 +175,12 @@ class TestRagTemplatesOptimizationUnitTests:
         rag_patterns.uri = "uri"
         rag_patterns.metadata = {}
 
-        embedded_artifact = mock.MagicMock()
-        embedded_artifact.path = str(tmp_path / "shared")
-
         with mock.patch.dict("sys.modules", modules):
             rag_templates_optimization.python_func(
                 extracted_text=str(tmp_path / "ext"),
                 test_data=str(tmp_path / "td.json"),
                 search_space_prep_report=str(tmp_path / "r.yml"),
                 rag_patterns=rag_patterns,
-                embedded_artifact=embedded_artifact,
                 test_data_key=None,
                 vector_io_provider_id="provider",
                 input_data_key=None,
@@ -205,33 +190,6 @@ class TestRagTemplatesOptimizationUnitTests:
         assert call_kwargs["test_data_key"] == ""
         assert call_kwargs["input_data_key"] == ""
 
-    @mock.patch.dict("os.environ", MOCKED_ENV_VARIABLES, clear=True)
-    def test_no_embedded_artifact_passes_none_templates(self, tmp_path):
-        """When embedded_artifact has no path attr, templates_dir=None is passed."""
-        modules, mock_create_ogx, mock_run_opt, _ = _make_ai4rag_mocks()
-        mock_create_ogx.return_value = mock.MagicMock()
-        mock_run_opt.return_value = SimpleNamespace(patterns=[])
-
-        rag_patterns = mock.MagicMock()
-        rag_patterns.path = str(tmp_path / "out")
-        rag_patterns.uri = "uri"
-        rag_patterns.metadata = {}
-
-        embedded_artifact = mock.MagicMock(spec=[])
-
-        with mock.patch.dict("sys.modules", modules):
-            rag_templates_optimization.python_func(
-                extracted_text=str(tmp_path / "ext"),
-                test_data=str(tmp_path / "td.json"),
-                search_space_prep_report=str(tmp_path / "r.yml"),
-                rag_patterns=rag_patterns,
-                embedded_artifact=embedded_artifact,
-                test_data_key="key.json",
-                vector_io_provider_id="provider",
-            )
-
-        assert mock_run_opt.call_args.kwargs["templates_dir"] is None
-
     def test_missing_ogx_env_raises_key_error(self, tmp_path):
         """Missing OGX env vars raise KeyError."""
         modules, _, _, _ = _make_ai4rag_mocks()
@@ -239,9 +197,6 @@ class TestRagTemplatesOptimizationUnitTests:
         rag_patterns = mock.MagicMock()
         rag_patterns.path = str(tmp_path / "out")
         rag_patterns.metadata = {}
-
-        embedded_artifact = mock.MagicMock()
-        embedded_artifact.path = str(tmp_path / "shared")
 
         with mock.patch.dict("os.environ", {}, clear=True):
             with mock.patch.dict("sys.modules", modules):
@@ -251,7 +206,6 @@ class TestRagTemplatesOptimizationUnitTests:
                         test_data=str(tmp_path / "td.json"),
                         search_space_prep_report=str(tmp_path / "r.yml"),
                         rag_patterns=rag_patterns,
-                        embedded_artifact=embedded_artifact,
                         test_data_key="key.json",
                         vector_io_provider_id="provider",
                     )
@@ -267,9 +221,6 @@ class TestRagTemplatesOptimizationUnitTests:
         rag_patterns.path = str(tmp_path / "out")
         rag_patterns.metadata = {}
 
-        embedded_artifact = mock.MagicMock()
-        embedded_artifact.path = str(tmp_path / "shared")
-
         with mock.patch.dict("sys.modules", modules):
             with pytest.raises(ValueError, match="test_data_path must point to a JSON file"):
                 rag_templates_optimization.python_func(
@@ -277,7 +228,6 @@ class TestRagTemplatesOptimizationUnitTests:
                     test_data=str(tmp_path / "td.json"),
                     search_space_prep_report=str(tmp_path / "r.yml"),
                     rag_patterns=rag_patterns,
-                    embedded_artifact=embedded_artifact,
                     test_data_key="key.json",
                     vector_io_provider_id="provider",
                 )

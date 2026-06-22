@@ -14,16 +14,19 @@ def _make_ai4rag_mocks():
     mock_create_s3_client = mock.MagicMock(name="create_s3_client")
     mock_discover_documents = mock.MagicMock(name="discover_documents")
 
-    mock_components = mock.MagicMock()
-    mock_components.create_s3_client = mock_create_s3_client
+    mock_s3_module = mock.MagicMock()
+    mock_s3_module.create_s3_client = mock_create_s3_client
 
-    mock_data = mock.MagicMock()
-    mock_data.discover_documents = mock_discover_documents
+    mock_discovery_module = mock.MagicMock()
+    mock_discovery_module.discover_documents = mock_discover_documents
 
     modules = {
         "ai4rag": mock.MagicMock(),
-        "ai4rag.components": mock_components,
-        "ai4rag.components.data": mock_data,
+        "ai4rag.components": mock.MagicMock(),
+        "ai4rag.components.data": mock.MagicMock(),
+        "ai4rag.components.data.documents_discovery": mock_discovery_module,
+        "ai4rag.components.utils": mock.MagicMock(),
+        "ai4rag.components.utils.s3": mock_s3_module,
     }
     return modules, mock_create_s3_client, mock_discover_documents
 
@@ -92,9 +95,10 @@ class TestDocumentsDiscoveryUnitTests:
 
         expected_dir = tmp_path / "descriptor"
         assert expected_dir.exists()
-        mock_result.save.assert_called_once()
-        save_path = mock_result.save.call_args[0][0]
-        assert str(save_path).endswith("documents_descriptor.json")
+        mock_result.save.assert_called_once_with(
+            path=expected_dir,
+            filename="documents_descriptor.json",
+        )
 
     def test_extracts_test_data_doc_names(self, tmp_path):
         """Test data doc names are extracted and passed to discover_documents."""

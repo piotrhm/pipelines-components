@@ -32,6 +32,7 @@ Refit outputs for all selected models are written under one ``models_artifact`` 
 | `split_config` | `Optional[dict]` | `None` | Optional split config stored in artifact metadata. |
 | `prediction_length` | `int` | `1` | Forecast horizon (number of timesteps). |
 | `known_covariates_names` | `Optional[List[str]]` | `None` | Optional list of known covariate column names. |
+| `preset` | `str` | `speed` | Training quality tier. ``"speed"`` (default) or ``"balanced"`` (may run more than 2x longer). |
 | `eval_metric` | `str` | `MASE` | Metric for model ranking (e.g. ``"MASE"``, ``"WQL"``). Defaults to ``"MASE"``. |
 
 ## Outputs 📤
@@ -110,7 +111,7 @@ def example_pipeline(
   - timeseries
   - automl
   - model-selection
-- **Last Verified**: 2026-05-27 12:00:00+00:00
+- **Last Verified**: 2026-06-10 12:00:00+00:00
 - **Owners**:
   - No Parent Owners: Yes
   - Approvers:
@@ -124,7 +125,10 @@ def example_pipeline(
 
 ### Component status artifact
 
-Writes ``component_status.json`` under ``component_status`` with ``component_id`` ``autogluon_timeseries_models_training`` and training stages (``load_data``, ``model_selection``, ``refit_full``, ``evaluate_models``). Artifact metadata display name: **Timeseries Models Training Status**.
+Writes ``component_status.json`` under ``component_status`` with ``component_id``
+``autogluon_timeseries_models_training`` and training stages (``load_data``, ``model_selection`` with
+steps ``feature_engineering``, ``model_training``, ``stacking``, ``evaluation``, ``refit_and_evaluate``).
+Artifact metadata display name: **Timeseries Models Training Status**.
 
 Inference notebooks are loaded from ``shared/notebook_templates/timeseries_notebook.ipynb`` at runtime (same shared package data as tabular training).
 
@@ -136,6 +140,4 @@ Under each ``{model_name}_FULL/metrics/`` directory:
 - **`back_testing.json`**: Multi-window backtest with ``per_window_metrics`` and ``series_analysis``
   (best/worst forecast timelines). Window error metrics use **natural positive** signs via
   ``filter_finite_metrics``. Best-effort after refit; omitted if backtest APIs or history are
-  insufficient.
-
-The timeseries notebook template loads ``back_testing.json`` when present for model insights.
+  insufficient. Visualized in the generated inference notebook when present.

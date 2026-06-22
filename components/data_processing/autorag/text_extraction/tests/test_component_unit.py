@@ -17,16 +17,17 @@ MOCKED_ENV_VARIABLES = {
 
 
 def _make_ai4rag_mocks():
-    """Build mock modules for ai4rag.components.data."""
+    """Build mock modules for ai4rag.components.data.text_extraction."""
     mock_extract_text = mock.MagicMock(name="extract_text")
 
-    mock_data = mock.MagicMock()
-    mock_data.extract_text = mock_extract_text
+    mock_text_extraction_module = mock.MagicMock()
+    mock_text_extraction_module.extract_text = mock_extract_text
 
     modules = {
         "ai4rag": mock.MagicMock(),
         "ai4rag.components": mock.MagicMock(),
-        "ai4rag.components.data": mock_data,
+        "ai4rag.components.data": mock.MagicMock(),
+        "ai4rag.components.data.text_extraction": mock_text_extraction_module,
     }
     return modules, mock_extract_text
 

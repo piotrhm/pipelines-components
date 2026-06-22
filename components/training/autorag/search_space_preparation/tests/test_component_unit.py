@@ -14,24 +14,27 @@ MOCKED_ENV_VARIABLES = {
 
 
 def _make_ai4rag_mocks():
-    """Build mock modules for ai4rag.components, ai4rag.components.optimization, ai4rag.utils.compat."""
+    """Build mock modules for ai4rag.components.optimization.search_space_preparation, ai4rag.components.utils.ogx_client, ai4rag.utils.compat."""
     mock_create_ogx_client = mock.MagicMock(name="create_ogx_client")
     mock_prepare_report = mock.MagicMock(name="prepare_search_space_report")
     mock_ensure_sqlite3 = mock.MagicMock(name="ensure_sqlite3")
 
-    mock_components = mock.MagicMock()
-    mock_components.create_ogx_client = mock_create_ogx_client
+    mock_ogx_module = mock.MagicMock()
+    mock_ogx_module.create_ogx_client = mock_create_ogx_client
 
-    mock_optimization = mock.MagicMock()
-    mock_optimization.prepare_search_space_report = mock_prepare_report
+    mock_report_module = mock.MagicMock()
+    mock_report_module.prepare_search_space_report = mock_prepare_report
 
     mock_compat = mock.MagicMock()
     mock_compat.ensure_sqlite3 = mock_ensure_sqlite3
 
     modules = {
         "ai4rag": mock.MagicMock(),
-        "ai4rag.components": mock_components,
-        "ai4rag.components.optimization": mock_optimization,
+        "ai4rag.components": mock.MagicMock(),
+        "ai4rag.components.utils": mock.MagicMock(),
+        "ai4rag.components.utils.ogx_client": mock_ogx_module,
+        "ai4rag.components.optimization": mock.MagicMock(),
+        "ai4rag.components.optimization.search_space_preparation": mock_report_module,
         "ai4rag.utils": mock.MagicMock(),
         "ai4rag.utils.compat": mock_compat,
     }

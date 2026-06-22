@@ -10,7 +10,7 @@ dependencies:
     - name: ai4rag
       version: "~=0.7.0"
     - name: OGX API
-      version: ">=1.0.0"
+      version: "~=1.1.0"
     - name: RHOAI Connections API
       version: ">=1.0.0"
     - name: Milvus

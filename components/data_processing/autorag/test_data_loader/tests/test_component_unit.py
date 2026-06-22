@@ -20,16 +20,19 @@ def _make_ai4rag_mocks():
     mock_create_s3_client = mock.MagicMock(name="create_s3_client")
     mock_load_test_data = mock.MagicMock(name="load_test_data")
 
-    mock_components = mock.MagicMock()
-    mock_components.create_s3_client = mock_create_s3_client
+    mock_s3_module = mock.MagicMock()
+    mock_s3_module.create_s3_client = mock_create_s3_client
 
-    mock_data = mock.MagicMock()
-    mock_data.load_test_data = mock_load_test_data
+    mock_loader_module = mock.MagicMock()
+    mock_loader_module.load_test_data = mock_load_test_data
 
     modules = {
         "ai4rag": mock.MagicMock(),
-        "ai4rag.components": mock_components,
-        "ai4rag.components.data": mock_data,
+        "ai4rag.components": mock.MagicMock(),
+        "ai4rag.components.data": mock.MagicMock(),
+        "ai4rag.components.data.test_data_loader": mock_loader_module,
+        "ai4rag.components.utils": mock.MagicMock(),
+        "ai4rag.components.utils.s3": mock_s3_module,
     }
     return modules, mock_create_s3_client, mock_load_test_data
 

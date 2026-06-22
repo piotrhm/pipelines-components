@@ -596,10 +596,13 @@ class TestTimeseriesModelsTrainingUnitTests:
             )
 
         # Verify partial success: DeepAR and AutoARIMA succeeded, TFT failed
-        assert result.top_models == ["DeepAR", "TFT", "AutoARIMA"]  # Original top models unchanged
+        # top_models: Original selection-phase ranking, returned unchanged for traceability
+        assert result.top_models == ["DeepAR", "TFT", "AutoARIMA"]
+        # model_names: Only models that successfully completed refit and were persisted
+        # This is the authoritative list of what's actually in models_artifact.path
         assert "model_names" in models_artifact.metadata
         model_names = json.loads(models_artifact.metadata["model_names"])
-        assert model_names == ["DeepAR_FULL", "AutoARIMA_FULL"]  # Only successful models
+        assert model_names == ["DeepAR_FULL", "AutoARIMA_FULL"]  # TFT omitted - refit failed
         assert len(models_artifact.metadata["context"]["models"]) == 2
 
         # Verify warning was logged

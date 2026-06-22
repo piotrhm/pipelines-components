@@ -393,7 +393,7 @@ class TestAutogluonModelsTrainingUnitTests:
     @mock.patch("pandas.read_csv")
     @mock.patch("autogluon.tabular.TabularPredictor")
     def test_speed_preset_fit_args(self, mock_predictor_class, mock_read_csv, tmp_path):
-        """Speed preset uses 1-hour time limit and the original fit args."""
+        """Speed preset uses a 45-minute time limit and good_quality AutoGluon preset."""
         mock_predictor = mock.MagicMock()
         mock_predictor_clone = mock.MagicMock()
         mock_predictor_class.return_value.fit.return_value = mock_predictor

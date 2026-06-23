@@ -21,7 +21,7 @@ def documents_indexing(
 ):
     """Index extracted text into a vector store with optional batch processing.
 
-    Thin wrapper that delegates to ``ai4rag.components.data.index_documents``.
+    Thin wrapper that delegates to ``ai4rag.components.data.indexing.index_documents``.
 
     Args:
         embedding_model_id: Embedding model ID used for the vector store.
@@ -39,8 +39,8 @@ def documents_indexing(
     import logging
     import os
 
-    from ai4rag.components import create_ogx_client
-    from ai4rag.components.data import index_documents
+    from ai4rag.components.data.indexing import index_documents
+    from ai4rag.components.utils.ogx_client import create_ogx_client
 
     logging.basicConfig(level=logging.INFO)
 

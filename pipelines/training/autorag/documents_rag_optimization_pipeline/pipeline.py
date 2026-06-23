@@ -63,8 +63,9 @@ def documents_rag_optimization_pipeline(
 
     The system integrates with OGX API for inference and vector database operations,
     producing optimized RAG patterns as artifacts that can be deployed and used for production
-    RAG applications. After optimization, request JSON bodies for OGX ``/v1/responses`` are
-    emitted per pattern (``prepare_responses_api_requests``).
+    RAG applications. Each optimized pattern contains a ``pattern.json`` with deployment
+    settings (including ``settings.responses_template`` for OGX ``/v1/responses``),
+    executable notebooks, and evaluation results.
 
     Args:
         test_data_secret_name: Name of the Kubernetes secret holding S3-compatible credentials for
@@ -151,6 +152,7 @@ def documents_rag_optimization_pipeline(
         extracted_text=text_extraction_task.outputs["extracted_text"],
         embedding_models=embedding_models,
         generation_models=generation_models,
+        metric=optimization_metric,
     )
 
     mps_task.set_caching_options(False)

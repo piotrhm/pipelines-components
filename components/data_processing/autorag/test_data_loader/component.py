@@ -21,7 +21,7 @@ def test_data_loader(
 ):
     """Download test data JSON from S3 and sample it for benchmarking.
 
-    Thin wrapper that delegates to ``ai4rag.components.data.load_test_data``.
+    Thin wrapper that delegates to ``ai4rag.components.data.test_data_loader.load_test_data``.
 
     Args:
         test_data_bucket_name: S3 (or compatible) bucket that contains the test
@@ -39,31 +39,18 @@ def test_data_loader(
         AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_S3_ENDPOINT.
         AWS_DEFAULT_REGION is optional.
     """
-    import importlib.util
     import json
     import logging
-    from pathlib import Path
 
     from ai4rag.components.data.test_data_loader import load_test_data
     from ai4rag.components.utils.s3 import create_s3_client
+    from kfp_components.components.training.autorag.shared.component_status import (  # pyright: ignore[reportMissingImports]
+        init_status_tracker,
+    )
 
     logging.basicConfig(level=logging.INFO)
 
-    if component_status is None:
-        from kfp_components.components.training.autorag.shared.component_status import (  # pyright: ignore[reportMissingImports]
-            null_component_status_tracker,
-        )
-
-        status = null_component_status_tracker()
-    else:
-        _embedded_path = Path(embedded_artifact.path)
-        _module_path = _embedded_path if _embedded_path.is_file() else _embedded_path / "component_status.py"
-        _spec = importlib.util.spec_from_file_location("_autorag_component_status", _module_path)
-        if _spec is None or _spec.loader is None:
-            raise ValueError(f"Cannot load embedded module from {_module_path}")
-        _status_module = importlib.util.module_from_spec(_spec)
-        _spec.loader.exec_module(_status_module)
-        status = _status_module.bootstrap_status_tracker(embedded_artifact, component_status, "test_data_loader")
+    status = init_status_tracker(embedded_artifact, component_status, "test_data_loader")
     with status:
         if component_status is not None:
             status.set_metadata(display_name="Test Data Loader Status")

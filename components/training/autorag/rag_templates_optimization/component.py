@@ -47,7 +47,6 @@ def rag_templates_optimization(
     Environment variables (required):
         OGX_CLIENT_BASE_URL, OGX_CLIENT_API_KEY.
     """
-    import importlib.util
     import logging
     import os
     from pathlib import Path
@@ -58,28 +57,14 @@ def rag_templates_optimization(
 
     from ai4rag.components.assets_generator.leaderboard import DEFAULT_METRIC, build_leaderboard_html
     from ai4rag.components.optimization.rag_templates_optimization import run_rag_optimization
-    from ai4rag.components.utils import create_ogx_client
+    from ai4rag.components.utils.ogx_client import create_ogx_client
+    from kfp_components.components.training.autorag.shared.component_status import (  # pyright: ignore[reportMissingImports]
+        init_status_tracker,
+    )
 
-    ensure_sqlite3()
     logging.basicConfig(level=logging.INFO)
 
-    if component_status is None:
-        from kfp_components.components.training.autorag.shared.component_status import (  # pyright: ignore[reportMissingImports]
-            null_component_status_tracker,
-        )
-
-        status = null_component_status_tracker()
-    else:
-        _embedded_path = Path(embedded_artifact.path)
-        _module_path = _embedded_path if _embedded_path.is_file() else _embedded_path / "component_status.py"
-        _spec = importlib.util.spec_from_file_location("_autorag_component_status", _module_path)
-        if _spec is None or _spec.loader is None:
-            raise ValueError(f"Cannot load embedded module from {_module_path}")
-        _status_module = importlib.util.module_from_spec(_spec)
-        _spec.loader.exec_module(_status_module)
-        status = _status_module.bootstrap_status_tracker(
-            embedded_artifact, component_status, "rag_templates_optimization"
-        )
+    status = init_status_tracker(embedded_artifact, component_status, "rag_templates_optimization")
     optimize_templates_steps = ["chunking", "embedding", "retrieval", "generation", "evaluation"]
 
     with status:
@@ -121,7 +106,7 @@ def rag_templates_optimization(
 
         with status.stage("build_leaderboard"):
             html_content = build_leaderboard_html(
-                patterns_dir=rag_patterns,
+                patterns_dir=output_dir,
                 optimization_metric=(
                     optimization_settings.get("metric") if isinstance(optimization_settings, dict) else DEFAULT_METRIC
                 ),
@@ -130,6 +115,7 @@ def rag_templates_optimization(
             Path(html_artifact.path).parent.mkdir(parents=True, exist_ok=True)
             with open(html_artifact.path, "w", encoding="utf-8") as f:
                 f.write(html_content)
+            html_artifact.metadata["display_name"] = "autorag_leaderboard"
 
 
 if __name__ == "__main__":

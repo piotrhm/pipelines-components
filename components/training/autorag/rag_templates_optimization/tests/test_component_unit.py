@@ -37,6 +37,7 @@ def _make_ai4rag_mocks():
         "ai4rag": mock.MagicMock(),
         "ai4rag.components": mock.MagicMock(),
         "ai4rag.components.utils": mock_utils,
+        "ai4rag.components.utils.ogx_client": mock_utils,
         "ai4rag.components.optimization": mock.MagicMock(),
         "ai4rag.components.optimization.rag_templates_optimization": mock_optimization_module,
         "ai4rag.components.assets_generator": mock.MagicMock(),
@@ -85,6 +86,11 @@ class TestRagTemplatesOptimizationUnitTests:
         rag_patterns.uri = "gs://bucket/rag_patterns"
         rag_patterns.metadata = {}
 
+        html_path = tmp_path / "leaderboard.html"
+        html_artifact = mock.MagicMock()
+        html_artifact.path = str(html_path)
+        html_artifact.metadata = {}
+
         with mock.patch.dict("sys.modules", modules):
             rag_templates_optimization.python_func(
                 extracted_text=str(tmp_path / "extracted"),
@@ -93,11 +99,12 @@ class TestRagTemplatesOptimizationUnitTests:
                 rag_patterns=rag_patterns,
                 test_data_key="data/test.json",
                 vector_io_provider_id="milvus-provider",
+                html_artifact=html_artifact,
                 optimization_settings={"max_number_of_rag_patterns": 8},
                 input_data_key="data/docs/",
             )
 
-        assert mock_sqlite.call_count == 2
+        mock_sqlite.assert_called_once()
         mock_create_ogx.assert_called_once_with(
             base_url="https://ogx.example.com",
             api_key="test-api-key",
@@ -130,6 +137,10 @@ class TestRagTemplatesOptimizationUnitTests:
         rag_patterns.uri = "gs://bucket/rag_patterns"
         rag_patterns.metadata = {}
 
+        html_artifact = mock.MagicMock()
+        html_artifact.path = str(tmp_path / "leaderboard.html")
+        html_artifact.metadata = {}
+
         with mock.patch.dict("sys.modules", modules):
             rag_templates_optimization.python_func(
                 extracted_text=str(tmp_path / "ext"),
@@ -138,6 +149,7 @@ class TestRagTemplatesOptimizationUnitTests:
                 rag_patterns=rag_patterns,
                 test_data_key="key.json",
                 vector_io_provider_id="provider",
+                html_artifact=html_artifact,
             )
 
         assert rag_patterns.metadata["name"] == "rag_patterns_artifact"
@@ -157,6 +169,10 @@ class TestRagTemplatesOptimizationUnitTests:
         rag_patterns.uri = "uri"
         rag_patterns.metadata = {}
 
+        html_artifact = mock.MagicMock()
+        html_artifact.path = str(tmp_path / "leaderboard.html")
+        html_artifact.metadata = {}
+
         with mock.patch.dict("sys.modules", modules):
             rag_templates_optimization.python_func(
                 extracted_text=str(tmp_path / "ext"),
@@ -165,6 +181,7 @@ class TestRagTemplatesOptimizationUnitTests:
                 rag_patterns=rag_patterns,
                 test_data_key="key.json",
                 vector_io_provider_id="provider",
+                html_artifact=html_artifact,
             )
 
         assert output_dir.exists()
@@ -181,6 +198,10 @@ class TestRagTemplatesOptimizationUnitTests:
         rag_patterns.uri = "uri"
         rag_patterns.metadata = {}
 
+        html_artifact = mock.MagicMock()
+        html_artifact.path = str(tmp_path / "leaderboard.html")
+        html_artifact.metadata = {}
+
         with mock.patch.dict("sys.modules", modules):
             rag_templates_optimization.python_func(
                 extracted_text=str(tmp_path / "ext"),
@@ -189,6 +210,7 @@ class TestRagTemplatesOptimizationUnitTests:
                 rag_patterns=rag_patterns,
                 test_data_key=None,
                 vector_io_provider_id="provider",
+                html_artifact=html_artifact,
                 input_data_key=None,
             )
 
@@ -204,6 +226,10 @@ class TestRagTemplatesOptimizationUnitTests:
         rag_patterns.path = str(tmp_path / "out")
         rag_patterns.metadata = {}
 
+        html_artifact = mock.MagicMock()
+        html_artifact.path = str(tmp_path / "leaderboard.html")
+        html_artifact.metadata = {}
+
         with mock.patch.dict("os.environ", {}, clear=True):
             with mock.patch.dict("sys.modules", modules):
                 with pytest.raises(KeyError):
@@ -214,6 +240,7 @@ class TestRagTemplatesOptimizationUnitTests:
                         rag_patterns=rag_patterns,
                         test_data_key="key.json",
                         vector_io_provider_id="provider",
+                        html_artifact=html_artifact,
                     )
 
     @mock.patch.dict("os.environ", MOCKED_ENV_VARIABLES, clear=True)
@@ -227,6 +254,10 @@ class TestRagTemplatesOptimizationUnitTests:
         rag_patterns.path = str(tmp_path / "out")
         rag_patterns.metadata = {}
 
+        html_artifact = mock.MagicMock()
+        html_artifact.path = str(tmp_path / "leaderboard.html")
+        html_artifact.metadata = {}
+
         with mock.patch.dict("sys.modules", modules):
             with pytest.raises(ValueError, match="test_data_path must point to a JSON file"):
                 rag_templates_optimization.python_func(
@@ -236,4 +267,49 @@ class TestRagTemplatesOptimizationUnitTests:
                     rag_patterns=rag_patterns,
                     test_data_key="key.json",
                     vector_io_provider_id="provider",
+                    html_artifact=html_artifact,
                 )
+
+    @mock.patch.dict("os.environ", MOCKED_ENV_VARIABLES, clear=True)
+    def test_leaderboard_html_written_with_correct_args(self, tmp_path):
+        """build_leaderboard_html receives output_dir (Path) and HTML is written to html_artifact."""
+        from pathlib import Path
+
+        modules, mock_create_ogx, mock_run_opt, _ = _make_ai4rag_mocks()
+        mock_create_ogx.return_value = mock.MagicMock()
+        mock_run_opt.return_value = SimpleNamespace(patterns=[{"name": "p1"}])
+
+        mock_leaderboard = modules["ai4rag.components.assets_generator.leaderboard"]
+        expected_html = "<html><body>leaderboard</body></html>"
+        mock_leaderboard.build_leaderboard_html.return_value = expected_html
+
+        output_dir = tmp_path / "rag_patterns"
+        rag_patterns = mock.MagicMock()
+        rag_patterns.path = str(output_dir)
+        rag_patterns.uri = "uri"
+        rag_patterns.metadata = {}
+
+        html_path = tmp_path / "leaderboard.html"
+        html_artifact = mock.MagicMock()
+        html_artifact.path = str(html_path)
+        html_artifact.metadata = {}
+
+        with mock.patch.dict("sys.modules", modules):
+            rag_templates_optimization.python_func(
+                extracted_text=str(tmp_path / "ext"),
+                test_data=str(tmp_path / "td.json"),
+                search_space_prep_report=str(tmp_path / "r.yml"),
+                rag_patterns=rag_patterns,
+                test_data_key="key.json",
+                vector_io_provider_id="provider",
+                html_artifact=html_artifact,
+            )
+
+        mock_leaderboard.build_leaderboard_html.assert_called_once()
+        call_kwargs = mock_leaderboard.build_leaderboard_html.call_args.kwargs
+        assert isinstance(call_kwargs["patterns_dir"], Path)
+        assert str(call_kwargs["patterns_dir"]) == str(output_dir)
+
+        assert html_path.exists()
+        assert html_path.read_text(encoding="utf-8") == expected_html
+        assert html_artifact.metadata["display_name"] == "autorag_leaderboard"

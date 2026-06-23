@@ -14,20 +14,23 @@ MOCKED_ENV_VARIABLES = {
 
 
 def _make_ai4rag_mocks():
-    """Build mock modules for ai4rag.components and ai4rag.components.data."""
+    """Build mock modules for ai4rag submodule imports."""
     mock_create_ogx_client = mock.MagicMock(name="create_ogx_client")
     mock_index_documents = mock.MagicMock(name="index_documents")
 
-    mock_components = mock.MagicMock()
-    mock_components.create_ogx_client = mock_create_ogx_client
+    mock_ogx_client_module = mock.MagicMock()
+    mock_ogx_client_module.create_ogx_client = mock_create_ogx_client
 
-    mock_data = mock.MagicMock()
-    mock_data.index_documents = mock_index_documents
+    mock_indexing_module = mock.MagicMock()
+    mock_indexing_module.index_documents = mock_index_documents
 
     modules = {
         "ai4rag": mock.MagicMock(),
-        "ai4rag.components": mock_components,
-        "ai4rag.components.data": mock_data,
+        "ai4rag.components": mock.MagicMock(),
+        "ai4rag.components.utils": mock.MagicMock(),
+        "ai4rag.components.utils.ogx_client": mock_ogx_client_module,
+        "ai4rag.components.data": mock.MagicMock(),
+        "ai4rag.components.data.indexing": mock_indexing_module,
     }
     return modules, mock_create_ogx_client, mock_index_documents
 

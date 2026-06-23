@@ -6,7 +6,7 @@
 
 Index extracted text into a vector store with optional batch processing.
 
-Thin wrapper that delegates to ``ai4rag.components.data.index_documents``.
+Thin wrapper that delegates to ``ai4rag.components.data.indexing.index_documents``.
 
 ## Inputs 📥
 

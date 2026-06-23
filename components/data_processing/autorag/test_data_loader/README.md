@@ -6,7 +6,7 @@
 
 Download test data JSON from S3 and sample it for benchmarking.
 
-Thin wrapper that delegates to ``ai4rag.components.data.load_test_data``.
+Thin wrapper that delegates to ``ai4rag.components.data.test_data_loader.load_test_data``.
 
 ## Inputs 📥
 

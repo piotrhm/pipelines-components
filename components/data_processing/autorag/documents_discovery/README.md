@@ -6,7 +6,7 @@
 
 Documents discovery component.
 
-Thin wrapper that delegates to ``ai4rag.components.data.discover_documents``.
+Thin wrapper that delegates to ``ai4rag.components.data.documents_discovery.discover_documents``.
 
 ## Inputs 📥
 

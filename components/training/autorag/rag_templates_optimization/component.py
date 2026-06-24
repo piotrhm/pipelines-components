@@ -57,7 +57,7 @@ def rag_templates_optimization(
     ensure_sqlite3()
 
     from ai4rag.components.assets_generator.leaderboard import build_leaderboard_html
-    from ai4rag.components.optimization.rag_templates_optimization import run_rag_optimization, DEFAULT_METRIC
+    from ai4rag.components.optimization.rag_templates_optimization import DEFAULT_METRIC, run_rag_optimization
     from ai4rag.components.utils.ogx_client import create_ogx_client
 
     logging.basicConfig(level=logging.INFO)

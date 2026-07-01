@@ -24,7 +24,7 @@ from kfp_components.components.training.autorag.search_space_preparation.compone
 MAX_CPUS = "32"
 MAX_MEMORY = "64Gi"
 
-SUPPORTED_OPTIMIZATION_METRICS = frozenset({"faithfulness", "answer_correctness", "context_correctness"})
+SUPPORTED_OPTIMIZATION_METRICS = frozenset({"faithfulness", "answer_correctness", "context_correctness", "answer_relevance"})
 
 # Must match run_status_templates/pipelines/<name>.json
 PIPELINE_NAME = "documents-rag-optimization-pipeline"
@@ -52,6 +52,7 @@ def documents_rag_optimization_pipeline(
     generation_models: Optional[List] = None,
     optimization_metric: str = "faithfulness",
     optimization_max_rag_patterns: int = 8,
+    llm_judge_model: Optional[str] = None,
 ):
     """Automated system for building and optimizing Retrieval-Augmented Generation (RAG) applications.
 
@@ -87,9 +88,14 @@ def documents_rag_optimization_pipeline(
         generation_models: Optional list of foundation/generation model identifiers to use in the
             search space.
         optimization_metric: Quality metric used to optimize RAG patterns. Supported values:
-            "faithfulness", "answer_correctness", "context_correctness".
+            "faithfulness", "answer_correctness", "context_correctness", "answer_relevance".
+            Note: "answer_relevance" requires llm_judge_model to be set.
         optimization_max_rag_patterns: Maximum number of RAG patterns to generate. Passed to ai4rag
             (max_number_of_rag_patterns). Defaults to 8.
+        llm_judge_model: Optional model identifier for LLM-as-a-judge evaluation. When set, uses
+            an LLM to score RAG quality instead of the default Unitxt evaluator. The judge LLM
+            is accessed via the OGX endpoint (ogx_secret_name credentials). Required when
+            optimization_metric is "answer_relevance".
     """
     component_stage_map_task = publish_component_stage_map(
         pipeline_id=PIPELINE_NAME,
@@ -167,6 +173,7 @@ def documents_rag_optimization_pipeline(
             "metric": optimization_metric,
             "max_number_of_rag_patterns": optimization_max_rag_patterns,
         },
+        llm_judge_model=llm_judge_model,
         test_data_key=test_data_key,
         input_data_key=input_data_key,
     )

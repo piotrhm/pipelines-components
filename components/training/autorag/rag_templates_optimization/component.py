@@ -23,6 +23,7 @@ def rag_templates_optimization(
     embedded_artifact: dsl.EmbeddedInput[dsl.Dataset] = None,
     optimization_settings: Optional[dict] = None,
     input_data_key: Optional[str] = "",
+    llm_judge_model: Optional[str] = None,
     component_status: dsl.Output[dsl.Artifact] = None,
 ):
     """RAG Templates Optimization component.
@@ -43,6 +44,8 @@ def rag_templates_optimization(
         embedded_artifact: Embedded ``autorag.shared`` helpers injected by KFP at runtime.
         optimization_settings: Additional experiment settings.
         input_data_key: Path to documents dir within bucket.
+        llm_judge_model: Optional model identifier for LLM-as-a-judge evaluation.
+            When set, uses an LLM to score RAG quality via the OGX endpoint.
 
     Environment variables (required):
         OGX_CLIENT_BASE_URL, OGX_CLIENT_API_KEY.
@@ -104,6 +107,7 @@ def rag_templates_optimization(
                 test_data_key=test_data_key or "",
                 input_data_key=input_data_key or "",
                 optimization_settings=optimization_settings,
+                llm_judge_model=llm_judge_model,
             )
 
             status.record(
